@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-
-from typing import Literal
+from typing import Any, Literal
 
 # --- Sort / Filter types ---
 

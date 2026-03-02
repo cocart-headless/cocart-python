@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from base64 import b64encode
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, Optional, Set
 from urllib.parse import urlencode
 
 from cocart.exceptions.authentication_exception import AuthenticationException
@@ -135,7 +135,8 @@ class CoCart:
 
     def login(self, username: str, password: str) -> Response:
         """Login with username and password via JWT authentication."""
-        return self.jwt().login(username, password)
+        result: Response = self.jwt().login(username, password)
+        return result
 
     def logout(self) -> CoCart:
         """Logout — call server logout endpoint, then clear local JWT tokens."""
@@ -166,8 +167,10 @@ class CoCart:
         guest_cart_key = self._cart_key
         self.set_auth(username, password)
         if guest_cart_key:
-            return self.cart().get(params={"cart_key": guest_cart_key})
-        return self.cart().get()
+            result: Response = self.cart().get(params={"cart_key": guest_cart_key})
+            return result
+        result2: Response = self.cart().get()
+        return result2
 
     # --- Configuration ---
 
@@ -617,7 +620,7 @@ class CoCart:
                     return min(float(retry_after), 60.0)
                 except ValueError:
                     pass
-        return min(2 ** (attempt - 1), 30.0)
+        return float(min(2 ** (attempt - 1), 30.0))
 
     def _apply_transformer(self, response: Response) -> Response:
         if self._response_transformer:

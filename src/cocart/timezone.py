@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 
@@ -12,7 +11,7 @@ class TimezoneHelper:
         """Detect the system timezone."""
         local_tz = datetime.now().astimezone().tzinfo
         if hasattr(local_tz, "key"):
-            return local_tz.key  # type: ignore[union-attr]
+            return str(local_tz.key)  # type: ignore[union-attr]
         return str(local_tz)
 
     def convert(self, date_string: str, from_tz: str, to_tz: str) -> str:

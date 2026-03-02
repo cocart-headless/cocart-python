@@ -54,9 +54,11 @@ class SessionManager:
         self._clear_stored_cart_key()
 
         if merge_cart and guest_cart_key:
-            return self._client.cart().get(params={"cart_key": guest_cart_key})
+            result: Response = self._client.cart().get(params={"cart_key": guest_cart_key})
+            return result
 
-        return self._client.cart().get()
+        result2: Response = self._client.cart().get()
+        return result2
 
     def login_with_token(self, token: str) -> Response:
         """Login with an existing JWT token."""
@@ -66,9 +68,11 @@ class SessionManager:
         self._clear_stored_cart_key()
 
         if guest_cart_key:
-            return self._client.cart().get(params={"cart_key": guest_cart_key})
+            result: Response = self._client.cart().get(params={"cart_key": guest_cart_key})
+            return result
 
-        return self._client.cart().get()
+        result2: Response = self._client.cart().get()
+        return result2
 
     def jwt(self, **kwargs: Any) -> Any:
         """Get the JWT manager instance."""
@@ -82,7 +86,7 @@ class SessionManager:
         """Login with JWT authentication."""
         guest_cart_key = self._client.get_cart_key()
 
-        login_response = self.jwt().login(username, password)
+        login_response: Response = self.jwt().login(username, password)
         self._clear_stored_cart_key()
 
         if merge_cart and guest_cart_key:

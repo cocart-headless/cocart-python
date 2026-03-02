@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from cocart.endpoints.endpoint import Endpoint
 from cocart.paginator import Paginator

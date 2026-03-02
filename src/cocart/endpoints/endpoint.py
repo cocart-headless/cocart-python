@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, NoReturn, Optional
 
 from cocart.exceptions.cocart_exception import CoCartException
 
@@ -81,7 +81,7 @@ class Endpoint:
         except Exception as e:
             self._handle_no_route(e)
 
-    def _handle_no_route(self, e: Exception) -> None:
+    def _handle_no_route(self, e: Exception) -> NoReturn:
         """Handle rest_no_route errors with a friendly message."""
         if isinstance(e, CoCartException) and e.error_code == "rest_no_route":
             raise CoCartException(

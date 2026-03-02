@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 
 class Response:
@@ -94,19 +94,19 @@ class Response:
 
     def get_cart_hash(self) -> Optional[str]:
         """Get cart hash from response data."""
-        return self.get("cart_hash")
+        return cast(Optional[str], self.get("cart_hash"))
 
     def get_items(self) -> List[Dict[str, Any]]:
         """Get cart items from response data."""
-        return self.get("items", [])
+        return cast(List[Dict[str, Any]], self.get("items", []))
 
     def get_totals(self) -> Dict[str, Any]:
         """Get cart totals from response data."""
-        return self.get("totals", {})
+        return cast(Dict[str, Any], self.get("totals", {}))
 
     def get_item_count(self) -> int:
         """Get item count from response data."""
-        return self.get("item_count", 0)
+        return cast(int, self.get("item_count", 0))
 
     def has_items(self) -> bool:
         """Check if cart has items."""
@@ -118,11 +118,11 @@ class Response:
 
     def get_notices(self) -> List[Any]:
         """Get notices from response data."""
-        return self.get("notices", [])
+        return cast(List[Any], self.get("notices", []))
 
     def get_coupons(self) -> List[Dict[str, Any]]:
         """Get applied coupons from response data."""
-        return self.get("coupons", [])
+        return cast(List[Dict[str, Any]], self.get("coupons", []))
 
     def has_coupons(self) -> bool:
         """Check if cart has coupons applied."""
@@ -130,23 +130,23 @@ class Response:
 
     def get_customer(self) -> Dict[str, Any]:
         """Get customer details from response data."""
-        return self.get("customer", {})
+        return cast(Dict[str, Any], self.get("customer", {}))
 
     def get_currency(self) -> Dict[str, Any]:
         """Get currency information from response data."""
-        return self.get("currency", {})
+        return cast(Dict[str, Any], self.get("currency", {}))
 
     def get_shipping_methods(self) -> List[Dict[str, Any]]:
         """Get shipping methods from response data."""
-        return self.get("shipping", [])
+        return cast(List[Dict[str, Any]], self.get("shipping", []))
 
     def get_fees(self) -> List[Dict[str, Any]]:
         """Get cart fees from response data."""
-        return self.get("fees", [])
+        return cast(List[Dict[str, Any]], self.get("fees", []))
 
     def get_cross_sells(self) -> List[Dict[str, Any]]:
         """Get cross-sell products from response data."""
-        return self.get("cross_sells", [])
+        return cast(List[Dict[str, Any]], self.get("cross_sells", []))
 
     # --- Pagination helpers ---
 
@@ -190,10 +190,10 @@ class Response:
         """Get the API error code from an error response."""
         if not self.is_error():
             return None
-        return self.get("code")
+        return cast(Optional[str], self.get("code"))
 
     def get_error_message(self) -> Optional[str]:
         """Get the error message from an error response."""
         if not self.is_error():
             return None
-        return self.get("message")
+        return cast(Optional[str], self.get("message"))

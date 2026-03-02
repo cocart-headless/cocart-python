@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import time
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 
 from cocart.exceptions.authentication_exception import AuthenticationException
 
@@ -156,7 +156,7 @@ class JwtManager:
         if "exp" not in payload:
             return False
 
-        return time.time() >= payload["exp"] - leeway
+        return bool(time.time() >= payload["exp"] - leeway)
 
     def get_token_expiry(self) -> Optional[int]:
         """Get the expiry timestamp of the current JWT token."""
@@ -181,7 +181,7 @@ class JwtManager:
 
     # --- Internal ---
 
-    def _decode_token_payload(self, token: str) -> Optional[dict]:
+    def _decode_token_payload(self, token: str) -> Optional[Dict[str, Any]]:
         """Decode the payload section of a JWT token without verification."""
         parts = token.split(".")
         if len(parts) != 3:
@@ -194,7 +194,7 @@ class JwtManager:
             if padding != 4:
                 payload_b64 += "=" * padding
             payload_bytes = base64.urlsafe_b64decode(payload_b64)
-            return json.loads(payload_bytes)
+            return cast(Dict[str, Any], json.loads(payload_bytes))
         except Exception:
             return None
 
