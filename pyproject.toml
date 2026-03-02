@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cocart"
+version = "1.0.0"
+description = "Official Python SDK for the CoCart REST API"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    { name = "CoCart Headless, LLC", email = "support@cocartapi.com" },
+]
+keywords = [
+    "cocart",
+    "woocommerce",
+    "cart",
+    "headless",
+    "sdk",
+    "rest-api",
+    "ecommerce",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "requests>=2.28.0",
+]
+
+[project.optional-dependencies]
+httpx = ["httpx>=0.24.0"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "mypy>=1.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://cocartapi.com"
+Repository = "https://github.com/cocart-headless/cocart-python-sdk"
+Issues = "https://github.com/cocart-headless/cocart-python-sdk/issues"
+Documentation = "https://cocartapi.com/docs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cocart"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+
+[tool.ruff]
+target-version = "py39"
+line-length = 120
