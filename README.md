@@ -22,6 +22,10 @@ Official Python SDK for the [CoCart](https://cocartapi.com) REST API.
 - Python 3.9+
 - `requests` library
 
+## Support Policy
+
+See [SUPPORT.md](SUPPORT.md) for our versioning policy, supported Python versions, and support lifecycle.
+
 ## Features
 
 * Full cart management (add, update, remove, clear items)
