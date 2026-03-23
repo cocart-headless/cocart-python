@@ -169,6 +169,86 @@ client.jwt().is_auto_refresh_enabled() # Check auto-refresh status
 client.jwt().set_auto_refresh(True)    # Enable/disable at runtime
 ```
 
+## Two-Factor Authentication (2FA)
+
+If the [WordPress Two Factor plugin](https://wordpress.org/plugins/two-factor/) is installed and a user has 2FA enabled, the server returns a `401` challenge response on the first login attempt instead of tokens. CoCart Plus v1.6.0+ and CoCart Community v4.8+ are required.
+
+The SDK surfaces this as a `TwoFactorRequiredException`, which you catch and handle before completing login with the OTP code.
+
+### Basic Flow
+
+```python
+from cocart import CoCart
+from cocart.exceptions import TwoFactorRequiredException
+
+client = CoCart("https://your-store.com")
+
+try:
+    response = client.login("customer@email.com", "password")
+    # No 2FA required — login complete
+except TwoFactorRequiredException as e:
+    # Prompt the user for their code, then complete login
+    code = input("Enter your 2FA code: ")  # e.g. "123456"
+
+    response = client.login_with_2fa("customer@email.com", "password", code)
+
+print(response.get("display_name"))  # "john"
+```
+
+### Inspecting the Challenge
+
+The exception carries metadata from the server about which 2FA providers are available:
+
+```python
+except TwoFactorRequiredException as e:
+    providers  = e.available_providers  # ["email", "totp"]
+    default    = e.default_provider     # "totp"
+    email_sent = e.email_sent           # True if email code was auto-sent
+
+    # Ask the user which provider to use, then:
+    response = client.login_with_2fa("customer@email.com", "password", code, provider="email")
+```
+
+### Specifying a Provider
+
+Pass the provider name as the `provider` keyword argument. If omitted, the server uses its default:
+
+```python
+# TOTP (authenticator app)
+client.login_with_2fa(username, password, totp_code, provider="totp")
+
+# Email
+client.login_with_2fa(username, password, email_code, provider="email")
+
+# Backup code
+client.login_with_2fa(username, password, backup_code, provider="backup-codes")
+
+# Let server decide (uses last-used or primary provider)
+client.login_with_2fa(username, password, code)
+```
+
+### With SessionManager (Cart Merge)
+
+If you are using `SessionManager` and want to merge a guest cart after login:
+
+```python
+from cocart.exceptions import TwoFactorRequiredException
+
+try:
+    response = session.login_with_jwt(username, password)
+except TwoFactorRequiredException as e:
+    response = session.login_with_jwt_2fa(username, password, code)
+    # Guest cart is merged automatically
+```
+
+### Supported 2FA Providers
+
+| Provider | Value | Notes |
+|---|---|---|
+| TOTP | `"totp"` | Authenticator apps (Google Authenticator, Authy). 6-digit code, 30-second window. |
+| Email | `"email"` | Code sent via email. When email is the default provider, the code is sent automatically on the first login attempt (`email_sent` is `True`). |
+| Backup Codes | `"backup-codes"` | Single-use static codes for account recovery. |
+
 ## Consumer Keys (Admin)
 
 For admin-only endpoints like Sessions API, use WooCommerce REST API credentials:

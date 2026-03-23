@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 
 from cocart.exceptions.authentication_exception import AuthenticationException
 from cocart.exceptions.cocart_exception import CoCartException
+from cocart.exceptions.two_factor_exception import TwoFactorRequiredException
 from cocart.exceptions.validation_exception import ValidationException
 from cocart.exceptions.version_exception import VersionException
 from cocart.http.requests_adapter import RequestsAdapter
@@ -594,6 +595,10 @@ class CoCart:
         message = f"{context}{api_message}{code_label}"
 
         response_data = data if isinstance(data, dict) else {}
+
+        # 2FA challenge (checked before generic 401 handling)
+        if code == "cocart_2fa_required":
+            raise TwoFactorRequiredException(message, http_code, code, response_data)
 
         # Authentication errors
         if http_code in (401, 403) or (isinstance(code, str) and "authenticat" in code):

@@ -94,6 +94,28 @@ class SessionManager:
 
         return login_response
 
+    def login_with_jwt_2fa(
+        self,
+        username: str,
+        password: str,
+        code: str,
+        provider: Optional[str] = None,
+        merge_cart: bool = True,
+    ) -> Response:
+        """Complete JWT login after a TwoFactorRequiredException.
+
+        Call this after catching TwoFactorRequiredException from login_with_jwt().
+        """
+        guest_cart_key = self._client.get_cart_key()
+
+        login_response: Response = self.jwt().login_with_2fa(username, password, code, provider)
+        self._clear_stored_cart_key()
+
+        if merge_cart and guest_cart_key:
+            self._client.cart().get(params={"cart_key": guest_cart_key})
+
+        return login_response
+
     def logout(self) -> SessionManager:
         """Logout and start a new guest session."""
         if self._jwt_manager_instance:
