@@ -569,12 +569,13 @@ class CoCart:
         # Cart key header
         if self._cart_key and not self.is_authenticated():
             headers["Cart-Key"] = self._cart_key
+            headers["CoCart-API-Cart-Key"] = self._cart_key  # Fallback for older plugin versions
 
         headers.update(self._custom_headers)
         return headers
 
     def _extract_cart_key(self, response: Response) -> None:
-        cart_key = response.get_header("Cart-Key")
+        cart_key = response.get_header("Cart-Key") or response.get_header("CoCart-API-Cart-Key")
         if cart_key is not None:
             self._cart_key = cart_key
             self._storage.set(self._storage_key, cart_key)
