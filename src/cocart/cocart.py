@@ -68,6 +68,7 @@ class CoCart:
 
         # Lazy-loaded instances
         self._jwt_manager_instance: Any = None
+        self._account_instance: Any = None
         self._cart_instance: Any = None
         self._products_instance: Any = None
         self._store_instance: Any = None
@@ -316,6 +317,13 @@ class CoCart:
                 self._cart_key = stored
 
     # --- Endpoints (lazy-loaded) ---
+
+    def account(self) -> Any:
+        if self._account_instance is None:
+            from cocart.endpoints.account import Account
+
+            self._account_instance = Account(self)
+        return self._account_instance
 
     def cart(self) -> Any:
         if self._cart_instance is None:
