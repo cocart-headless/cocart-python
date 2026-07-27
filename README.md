@@ -13,7 +13,6 @@ Official Python SDK for the [CoCart](https://cocartapi.com) REST API.
 * [ ] Add SDK docs to documentation site
 * [ ] Add support for Cart API extras
 * [ ] Add Checkout API support
-* [ ] Add Customers Account API support
 
 ---
 
@@ -29,12 +28,14 @@ See [SUPPORT.md](SUPPORT.md) for our versioning policy, supported Python version
 ## Features
 
 * Full cart management (add, update, remove, clear items)
+* Batch requests — single round-trip for multiple sub-requests (CoCart Plus)
 * Guest customer support with automatic cart key tracking
 * Authenticated user support (Basic Auth & JWT)
-* JWT token lifecycle (login, refresh, validate, auto-refresh)
+* JWT token lifecycle (login, 2FA verification, refresh, validate, auto-refresh)
 * Session management and cart transfer on login
 * Fetch products easily, search and filter results
 * Sessions management (admin)
+* Customer account access (profile, orders, downloads, reviews)
 * Multiple storage adapters for cart key and token persistence
 * Multiple HTTP adapters (`requests` default, `httpx` optional)
 * `typing.Protocol` interfaces for easy mocking in tests
@@ -51,8 +52,9 @@ See [SUPPORT.md](SUPPORT.md) for our versioning policy, supported Python version
 |-------|-------------|
 | [Installation](docs/installation.md) | Requirements, pip install, HTTP adapters, configuration options |
 | [Authentication](docs/authentication.md) | Guest sessions, Basic Auth, JWT (login/refresh/validate/auto-refresh), consumer keys, white-labelling |
-| [Cart](docs/cart.md) | Add/update/remove items, coupons, customer details, shipping, fees, totals |
+| [Cart](docs/cart.md) | Add/update/remove items, batch requests, coupons, customer details, shipping, fees, totals |
 | [Products](docs/products.md) | List/search/filter products, pagination, variations, categories, tags, attributes, reviews |
+| [Account](docs/account.md) | Authenticated customer profile, password change, order history, downloads, reviews (supported now, awaiting a CoCart plugin release) |
 | [Sessions](docs/sessions.md) | Admin sessions API, SessionManager, storage adapters, cart transfer on login |
 | [Error Handling](docs/error-handling.md) | Exception hierarchy, catching errors, HTTP status mapping, response error helpers |
 | [Utilities](docs/utilities.md) | Currency and timezone utility helpers that operate on data already returned by the API |

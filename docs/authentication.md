@@ -82,6 +82,32 @@ print(response.get("user_id"))       # "123"
 cart = client.cart().get()
 ```
 
+### Two-Factor Authentication (2FA)
+
+If the [CoCart 2FA](https://cocartapi.com) plugin is installed and the user
+has 2FA enabled, `login()` raises `TwoFactorRequiredException` instead of
+returning tokens. Catch it, prompt the user for a verification code, then
+call `verify_two_factor()` to complete the login:
+
+```python
+from cocart.exceptions import TwoFactorRequiredException
+
+try:
+    response = client.login("customer@email.com", "password")
+except TwoFactorRequiredException as e:
+    print(e.available_providers)  # e.g. ["email", "totp"]
+    print(e.default_provider)     # e.g. "email"
+    print(e.email_sent)           # True if a code was emailed automatically
+
+    code = input("Enter your 2FA code: ")
+    response = client.verify_two_factor(
+        "customer@email.com", "password", code, provider=e.default_provider,
+    )
+
+# Subsequent requests automatically use the acquired credentials
+cart = client.cart().get()
+```
+
 ### Logout
 
 ```python

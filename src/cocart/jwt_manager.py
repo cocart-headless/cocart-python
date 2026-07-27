@@ -6,6 +6,7 @@ import time
 from typing import TYPE_CHECKING, Any, Dict, Optional, cast
 
 from cocart.exceptions.authentication_exception import AuthenticationException
+from cocart.exceptions.two_factor_required_exception import TwoFactorRequiredException
 
 if TYPE_CHECKING:
     from cocart.cocart import CoCart
@@ -50,28 +51,42 @@ class JwtManager:
     def login(self, username: str, password: str) -> Response:
         """Login with username and password to acquire JWT tokens.
 
-        Requires the CoCart JWT Authentication plugin.
+        Requires the CoCart JWT Authentication plugin. Raises
+        :class:`AuthenticationException` if the plugin isn't installed.
+
+        If the CoCart 2FA plugin is installed and the user has 2FA enabled,
+        raises :class:`TwoFactorRequiredException` (carrying the available
+        providers). Catch it, prompt for a code, then call
+        :meth:`verify_two_factor` to complete login.
         """
         response = self._client.post("login", {"username": username, "password": password})
+        return self._extract_and_persist_tokens(response)
 
-        data = response.to_dict()
-        extras = data.get("extras", {}) if isinstance(data, dict) else {}
-        jwt_token = extras.get("jwt_token") if isinstance(extras, dict) else None
-        refresh_token = extras.get("jwt_refresh") if isinstance(extras, dict) else None
+    def verify_two_factor(
+        self,
+        username: str,
+        password: str,
+        code: str,
+        provider: Optional[str] = None,
+    ) -> Response:
+        """Complete login after a 2FA challenge.
 
-        if jwt_token:
-            self._client.set_jwt_token(jwt_token)
-            if refresh_token:
-                self._client.set_refresh_token(refresh_token)
-            self._persist_tokens()
-        else:
-            raise AuthenticationException(
-                "JWT token not found in login response. Is the CoCart JWT Authentication plugin installed?",
-                http_code=0,
-                error_code="cocart_jwt_missing",
-            )
+        Call this after catching :class:`TwoFactorRequiredException` from
+        :meth:`login`.
 
-        return response
+        Args:
+            username: Username, email, or phone.
+            password: Password.
+            code: The 2FA verification code from the user.
+            provider: Provider name (e.g. ``"email"``, ``"totp"``); omit to use
+                the server's default.
+        """
+        body: Dict[str, str] = {"username": username, "password": password, "2fa_code": code}
+        if provider:
+            body["2fa_provider"] = provider
+
+        response = self._client.post("login", body)
+        return self._extract_and_persist_tokens(response)
 
     def refresh(self, refresh_token: Optional[str] = None) -> Response:
         """Refresh the JWT access token using the refresh token."""
@@ -116,7 +131,11 @@ class JwtManager:
         try:
             return callback(self._client)
         except AuthenticationException as e:
-            if not self._is_refreshing and self._client.get_refresh_token():
+            if (
+                not isinstance(e, TwoFactorRequiredException)
+                and not self._is_refreshing
+                and self._client.get_refresh_token()
+            ):
                 self._is_refreshing = True
                 try:
                     self.refresh()
@@ -180,6 +199,31 @@ class JwtManager:
         return self._client
 
     # --- Internal ---
+
+    def _extract_and_persist_tokens(self, response: Response) -> Response:
+        """Extract ``jwt_token``/``jwt_refresh`` from a login response's
+        ``extras`` field, set them on the client, and persist them to storage.
+
+        Shared by :meth:`login` and :meth:`verify_two_factor`.
+        """
+        data = response.to_dict()
+        extras = data.get("extras", {}) if isinstance(data, dict) else {}
+        jwt_token = extras.get("jwt_token") if isinstance(extras, dict) else None
+        refresh_token = extras.get("jwt_refresh") if isinstance(extras, dict) else None
+
+        if jwt_token:
+            self._client.set_jwt_token(jwt_token)
+            if refresh_token:
+                self._client.set_refresh_token(refresh_token)
+            self._persist_tokens()
+        else:
+            raise AuthenticationException(
+                "JWT token not found in login response. Is the CoCart JWT Authentication plugin installed?",
+                http_code=0,
+                error_code="cocart_jwt_missing",
+            )
+
+        return response
 
     def _decode_token_payload(self, token: str) -> Optional[Dict[str, Any]]:
         """Decode the payload section of a JWT token without verification."""

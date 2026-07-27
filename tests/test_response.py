@@ -149,6 +149,29 @@ class TestCartHelpers:
         assert len(r.get_notices()) == 1
 
 
+class TestTaxHelpers:
+    def test_get_taxes_array_shape(self) -> None:
+        r = Response(200, {}, json.dumps({
+            "taxes": [{"key": "US-US-1", "name": "State Tax", "price": "10.00"}],
+        }))
+        taxes = r.get_taxes()
+        assert taxes == [{"key": "US-US-1", "name": "State Tax", "price": "10.00"}]
+        assert r.has_taxes()
+
+    def test_get_taxes_legacy_object_shape(self) -> None:
+        r = Response(200, {}, json.dumps({
+            "taxes": {"US-US-1": {"name": "State Tax", "price": "10.00"}},
+        }))
+        taxes = r.get_taxes()
+        assert taxes == [{"key": "US-US-1", "name": "State Tax", "price": "10.00"}]
+        assert r.has_taxes()
+
+    def test_get_taxes_empty(self) -> None:
+        r = Response(200, {}, "{}")
+        assert r.get_taxes() == []
+        assert not r.has_taxes()
+
+
 class TestPagination:
     def test_pagination_headers(self) -> None:
         r = Response(200, {"X-WP-Total": "50", "X-WP-TotalPages": "5"}, "[]")

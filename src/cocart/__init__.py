@@ -9,6 +9,7 @@ from cocart.session_manager import SessionManager
 
 # Endpoints
 from cocart.endpoints.endpoint import Endpoint
+from cocart.endpoints.account import Account
 from cocart.endpoints.cart import Cart
 from cocart.endpoints.products import Products
 from cocart.endpoints.store import Store
@@ -17,6 +18,7 @@ from cocart.endpoints.sessions import Sessions
 # Exceptions
 from cocart.exceptions.cocart_exception import CoCartException
 from cocart.exceptions.authentication_exception import AuthenticationException
+from cocart.exceptions.two_factor_required_exception import TwoFactorRequiredException
 from cocart.exceptions.validation_exception import ValidationException
 from cocart.exceptions.version_exception import VersionException
 
@@ -46,6 +48,7 @@ __all__ = [
     "SessionManager",
     # Endpoints
     "Endpoint",
+    "Account",
     "Cart",
     "Products",
     "Store",
@@ -53,6 +56,7 @@ __all__ = [
     # Exceptions
     "CoCartException",
     "AuthenticationException",
+    "TwoFactorRequiredException",
     "ValidationException",
     "VersionException",
     # Utilities

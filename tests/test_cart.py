@@ -59,13 +59,21 @@ class TestCartItems:
 
     def test_add_items(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
         mock_adapter.queue(200, body='{}')
-        client.cart().add_items([
-            {"id": 1, "quantity": 2},
-            {"id": 2, "quantity": 1},
-        ])
+        client.cart().add_items(100, {"1": 2, "2": 1})
         body = json.loads(mock_adapter.last_request["body"])
-        assert len(body["items"]) == 2
-        assert body["items"][0]["id"] == "1"
+        assert body["id"] == "100"
+        assert body["quantity"] == {"1": "2", "2": "1"}
+        assert "add-items" in mock_adapter.last_request["url"]
+
+    def test_add_items_list_format(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        mock_adapter.queue(200, body='{}')
+        client.cart().add_items(100, [{"id": 1, "quantity": 2}, {"id": 2, "quantity": 1}])
+        body = json.loads(mock_adapter.last_request["body"])
+        assert body["quantity"] == {"1": "2", "2": "1"}
+
+    def test_add_items_requires_at_least_one(self, client: CoCart) -> None:
+        with pytest.raises(ValidationException, match="at least one item"):
+            client.cart().add_items(100, {})
 
     def test_update_item(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
         mock_adapter.queue(200, body='{}')
@@ -75,10 +83,27 @@ class TestCartItems:
         assert "item/itemkey" in mock_adapter.last_request["url"]
 
     def test_update_items_shorthand(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        mock_adapter.queue(200, body='{"item_key": "k1"}')
+        mock_adapter.queue(200, body='{"item_key": "k2"}')
+        response = client.cart().update_items({"k1": 2, "k2": 3})
+        assert len(mock_adapter.requests) == 2
+        assert "item/k1" in mock_adapter.requests[0]["url"]
+        assert "item/k2" in mock_adapter.requests[1]["url"]
+        assert response.get("item_key") == "k2"
+
+    def test_update_items_requires_at_least_one(self, client: CoCart) -> None:
+        with pytest.raises(ValidationException, match="at least one item"):
+            client.cart().update_items({})
+
+    def test_batch_update_items(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
         mock_adapter.queue(200, body='{}')
-        client.cart().update_items({"k1": 2, "k2": 3})
+        client.cart().batch_update_items({"k1": 2, "k2": 3})
         body = json.loads(mock_adapter.last_request["body"])
-        assert len(body["items"]) == 2
+        assert "batch" in mock_adapter.last_request["url"]
+        assert len(body["requests"]) == 2
+        assert body["requests"][0]["method"] == "POST"
+        assert body["requests"][0]["path"] == "/cocart/v2/cart/item/k1"
+        assert body["requests"][0]["body"] == {"quantity": "2"}
 
     def test_remove_item(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
         mock_adapter.queue(200, body='{}')
@@ -88,10 +113,21 @@ class TestCartItems:
 
     def test_remove_items(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
         mock_adapter.queue(200, body='{}')
+        mock_adapter.queue(200, body='{}')
         client.cart().remove_items(["k1", "k2"])
+        assert len(mock_adapter.requests) == 2
+        assert mock_adapter.requests[0]["method"] == "DELETE"
+        assert "item/k1" in mock_adapter.requests[0]["url"]
+        assert "item/k2" in mock_adapter.requests[1]["url"]
+
+    def test_batch_remove_items(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        mock_adapter.queue(200, body='{}')
+        client.cart().batch_remove_items(["k1", "k2"])
         body = json.loads(mock_adapter.last_request["body"])
-        assert len(body["items"]) == 2
-        assert body["items"][0]["quantity"] == "0"
+        assert "batch" in mock_adapter.last_request["url"]
+        assert len(body["requests"]) == 2
+        assert body["requests"][0]["method"] == "DELETE"
+        assert body["requests"][0]["path"] == "/cocart/v2/cart/item/k1"
 
     def test_restore_item(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
         mock_adapter.queue(200, body='{}')
@@ -163,9 +199,25 @@ class TestCartCustomer:
             shipping={"city": "NYC"},
         )
         body = json.loads(mock_adapter.last_request["body"])
-        assert body["billing_first_name"] == "John"
-        assert body["billing_email"] == "john@example.com"
-        assert body["shipping_city"] == "NYC"
+        assert body["namespace"] == "update-customer"
+        assert body["first_name"] == "John"
+        assert body["email"] == "john@example.com"
+        assert body["s_city"] == "NYC"
+        assert body["ship_to_different_address"] is True
+        assert "billing_first_name" not in body
+        assert "shipping_city" not in body
+
+    def test_update_customer_mirrors_billing_when_no_shipping(
+        self, client: CoCart, mock_adapter: MockHttpAdapter
+    ) -> None:
+        mock_adapter.queue(200, body='{}')
+        client.cart().update_customer(billing={"first_name": "John", "city": "NYC"})
+        body = json.loads(mock_adapter.last_request["body"])
+        assert body["namespace"] == "update-customer"
+        assert body["first_name"] == "John"
+        assert body["s_first_name"] == "John"
+        assert body["s_city"] == "NYC"
+        assert "ship_to_different_address" not in body
 
 
 class TestCartShipping:
@@ -173,7 +225,23 @@ class TestCartShipping:
         mock_adapter.queue(200, body='{}')
         client.cart().set_shipping_method("flat_rate:1")
         body = json.loads(mock_adapter.last_request["body"])
-        assert body["method_key"] == "flat_rate:1"
+        assert body["rate_id"] == "flat_rate:1"
+        assert "package_id" not in body
+
+    def test_set_shipping_method_with_package_id(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        mock_adapter.queue(200, body='{}')
+        client.cart().set_shipping_method("flat_rate:1", "0")
+        body = json.loads(mock_adapter.last_request["body"])
+        assert body["rate_id"] == "flat_rate:1"
+        assert body["package_id"] == "0"
+
+    def test_calculate_shipping_delegates_to_calculate(
+        self, client: CoCart, mock_adapter: MockHttpAdapter
+    ) -> None:
+        mock_adapter.queue(200, body='{}')
+        client.cart().calculate_shipping({"country": "US"})
+        assert "calculate" in mock_adapter.last_request["url"]
+        assert "shipping" not in mock_adapter.last_request["url"]
 
 
 class TestCartFees:

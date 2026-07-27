@@ -184,6 +184,16 @@ class TestHeaders:
         c.get("cart")
         headers = mock_adapter.last_request["headers"]
         assert headers["Cart-Key"] == "guest123"
+        assert "CoCart-API-Cart-Key" not in headers
+
+    def test_cart_key_header_for_legacy_plugin(self, mock_adapter: MockHttpAdapter) -> None:
+        c = CoCart("https://example.com", cart_key="guest123", main_plugin="legacy")
+        c._http_adapter = mock_adapter  # type: ignore[assignment]
+        mock_adapter.queue(200, body="{}")
+        c.get("cart")
+        headers = mock_adapter.last_request["headers"]
+        assert headers["CoCart-API-Cart-Key"] == "guest123"
+        assert "Cart-Key" not in headers
 
     def test_custom_headers(self, mock_adapter: MockHttpAdapter) -> None:
         c = CoCart("https://example.com", headers={"X-Custom": "value"})
@@ -233,6 +243,16 @@ class TestETag:
         mock_adapter.queue(200, body="{}")
         c.get("cart")
         assert "If-None-Match" not in mock_adapter.requests[1]["headers"]
+
+    def test_etag_304_returns_cached_body(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        mock_adapter.queue(200, headers={"etag": '"abc123"'}, body='{"items":["widget"]}')
+        first = client.get("cart")
+        assert first.to_dict() == {"items": ["widget"]}
+
+        mock_adapter.queue(304, body="")
+        second = client.get("cart")
+        assert second.status_code == 304
+        assert second.to_dict() == {"items": ["widget"]}
 
 
 class TestCartKeyExtraction:
@@ -286,3 +306,81 @@ class TestRequestRaw:
         client.request_raw("POST", "cocart/jwt/refresh-token", data={"refresh_token": "rt"})
         assert "cocart/jwt/refresh-token" in mock_adapter.last_request["url"]
         assert "/v2/" not in mock_adapter.last_request["url"]
+
+
+class TestRetryJitter:
+    def test_retry_delay_has_jitter(self, client: CoCart) -> None:
+        # ±20% jitter around a base of 1s (attempt=2 => base 2^(2-1)=2s... use attempt=1 => base=1s)
+        delays = {client._get_retry_delay(1) for _ in range(50)}
+        assert len(delays) > 1  # jitter produces varying delays
+        for delay in delays:
+            assert 0.8 <= delay <= 1.2
+
+    def test_retry_after_header_ignores_jitter(self, client: CoCart) -> None:
+        from cocart.response import Response
+
+        response = Response(429, {"Retry-After": "5"}, "{}")
+        assert client._get_retry_delay(1, response) == 5.0
+
+
+class TestInFlightGetDedup:
+    def test_concurrent_identical_gets_share_one_request(
+        self, client: CoCart, mock_adapter: MockHttpAdapter
+    ) -> None:
+        import threading
+        import time as time_module
+
+        real_request = mock_adapter.request
+        call_count = {"n": 0}
+        lock = threading.Lock()
+
+        def slow_request(*args: object, **kwargs: object):
+            with lock:
+                call_count["n"] += 1
+            time_module.sleep(0.05)
+            return real_request(*args, **kwargs)  # type: ignore[arg-type]
+
+        mock_adapter.queue(200, body='{"ok": true}')
+        mock_adapter.request = slow_request  # type: ignore[assignment]
+
+        results = []
+        errors = []
+
+        def do_get() -> None:
+            try:
+                results.append(client.get("cart"))
+            except Exception as e:  # pragma: no cover - defensive
+                errors.append(e)
+
+        threads = [threading.Thread(target=do_get) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors
+        assert call_count["n"] == 1
+        assert len(results) == 5
+
+
+class TestBatch:
+    def test_batch_posts_requests(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        mock_adapter.queue(200, body='{"cart_hash": "abc"}')
+        client.batch([
+            {"method": "POST", "path": "/cocart/v2/cart/item/k1", "body": {"quantity": "2"}},
+        ])
+        assert "cocart/batch" in mock_adapter.last_request["url"]
+        body = json.loads(mock_adapter.last_request["body"])
+        assert body["requests"][0]["path"] == "/cocart/v2/cart/item/k1"
+
+    def test_batch_requires_at_least_one_request(self, client: CoCart) -> None:
+        with pytest.raises(ValidationException, match="at least one request"):
+            client.batch([])
+
+    def test_batch_no_route_raises_plugin_required(
+        self, client: CoCart, mock_adapter: MockHttpAdapter
+    ) -> None:
+        mock_adapter.queue(404, body='{"code":"rest_no_route","message":"No route"}')
+        with pytest.raises(CoCartException) as exc_info:
+            client.batch([{"method": "POST", "path": "/cocart/v2/cart/clear"}])
+        assert exc_info.value.error_code == "cocart_plugin_required"

@@ -148,6 +148,36 @@ class Response:
         """Get cross-sell products from response data."""
         return cast(List[Dict[str, Any]], self.get("cross_sells", []))
 
+    def get_taxes(self) -> List[Dict[str, Any]]:
+        """Get cart tax lines from response data, normalized to a flat list.
+
+        The ``taxes`` field is returned as an array by some CoCart versions,
+        but as a legacy object keyed by tax rate code by others, e.g.
+        ``{"US-US-1": {"name": ..., "price": ...}}``. This normalizes both
+        shapes to ``[{"key": ..., "name": ..., "price": ...}, ...]`` so
+        callers never need to branch on plugin/version themselves.
+        """
+        raw = self.get("taxes", [])
+
+        if isinstance(raw, list):
+            return cast(List[Dict[str, Any]], raw)
+
+        if isinstance(raw, dict):
+            return [
+                {
+                    "key": key,
+                    "name": tax.get("name") if isinstance(tax, dict) else None,
+                    "price": tax.get("price") if isinstance(tax, dict) else None,
+                }
+                for key, tax in raw.items()
+            ]
+
+        return []
+
+    def has_taxes(self) -> bool:
+        """Check if the cart has any tax lines."""
+        return len(self.get_taxes()) > 0
+
     # --- Pagination helpers ---
 
     def get_total_results(self) -> Optional[int]:

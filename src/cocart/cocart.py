@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 import logging
+import random
+import threading
 import time
 from base64 import b64encode
-from typing import Any, Callable, Dict, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, cast
 from urllib.parse import urlencode
 
 from cocart.exceptions.authentication_exception import AuthenticationException
 from cocart.exceptions.cocart_exception import CoCartException
+from cocart.exceptions.two_factor_required_exception import TwoFactorRequiredException
 from cocart.exceptions.validation_exception import ValidationException
 from cocart.exceptions.version_exception import VersionException
 from cocart.http.requests_adapter import RequestsAdapter
@@ -16,6 +19,17 @@ from cocart.response import Response
 from cocart.storage.memory_storage import MemoryStorage
 
 logger = logging.getLogger("cocart")
+
+
+class _InFlightGet:
+    """Tracks a GET request shared by concurrent callers requesting the same URL."""
+
+    __slots__ = ("event", "response", "error")
+
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.response: Optional[Response] = None
+        self.error: Optional[BaseException] = None
 
 
 class CoCart:
@@ -54,7 +68,7 @@ class CoCart:
         self._auth_header_name: str = kwargs.get("auth_header_name", "Authorization")
         self._response_transformer: Optional[Callable[[Response], Response]] = None
         self._etag_enabled: bool = kwargs.get("etag", True)
-        self._etag_cache: Dict[str, str] = {}
+        self._etag_cache: Dict[str, Dict[str, Any]] = {}
         self._main_plugin: str = kwargs.get("main_plugin", "basic")
         self._verify_ssl: bool = kwargs.get("verify_ssl", True)
         self._last_response: Optional[Response] = None
@@ -65,12 +79,17 @@ class CoCart:
         # HTTP adapter
         self._http_adapter = RequestsAdapter()
 
+        # In-flight GET de-duplication
+        self._inflight_lock = threading.Lock()
+        self._inflight_gets: Dict[str, _InFlightGet] = {}
+
         # Lazy-loaded instances
         self._jwt_manager_instance: Any = None
         self._cart_instance: Any = None
         self._products_instance: Any = None
         self._store_instance: Any = None
         self._sessions_instance: Any = None
+        self._account_instance: Any = None
 
         # Handle auth kwargs
         username = kwargs.get("username")
@@ -134,8 +153,20 @@ class CoCart:
         return self
 
     def login(self, username: str, password: str) -> Response:
-        """Login with username and password via JWT authentication."""
+        """Login with username and password via JWT authentication.
+
+        Raises :class:`~cocart.exceptions.TwoFactorRequiredException` if the
+        CoCart 2FA plugin requires a verification code — catch it and call
+        :meth:`verify_two_factor` to complete login.
+        """
         result: Response = self.jwt().login(username, password)
+        return result
+
+    def verify_two_factor(
+        self, username: str, password: str, code: str, provider: Optional[str] = None
+    ) -> Response:
+        """Complete login after a 2FA challenge from :meth:`login`."""
+        result: Response = self.jwt().verify_two_factor(username, password, code, provider)
         return result
 
     def logout(self) -> CoCart:
@@ -344,6 +375,45 @@ class CoCart:
             self._sessions_instance = Sessions(self)
         return self._sessions_instance
 
+    def account(self) -> Any:
+        if self._account_instance is None:
+            from cocart.endpoints.account import Account
+
+            self._account_instance = Account(self)
+        return self._account_instance
+
+    # --- Batch ---
+
+    def batch(self, requests: List[Dict[str, Any]]) -> Response:
+        """Dispatch multiple sub-requests in a single call via ``{namespace}/batch``.
+
+        Requires the CoCart Plus plugin. Returns one merged, up-to-date cart
+        response with per-operation notices, instead of one response per request.
+
+        Args:
+            requests: A list of ``{method, path, body?}`` request items.
+        """
+        if not requests:
+            raise ValidationException(
+                "batch() requires at least one request.",
+                http_code=0,
+                error_code="cocart_batch_empty",
+            )
+
+        params = {"cart_key": self._cart_key} if self._cart_key and not self.is_authenticated() else None
+
+        try:
+            return self.request_raw("POST", f"{self._namespace}/batch", params, {"requests": requests})
+        except CoCartException as e:
+            if e.error_code == "rest_no_route":
+                raise CoCartException(
+                    "This method is only available with another CoCart plugin. "
+                    "Please ask support for assistance!",
+                    http_code=404,
+                    error_code="cocart_plugin_required",
+                ) from e
+            raise
+
     # --- HTTP methods ---
 
     def get(self, endpoint: str, params: Optional[Dict[str, str]] = None) -> Response:
@@ -384,7 +454,8 @@ class CoCart:
             return self._execute_request(method, endpoint, params, data)
         except AuthenticationException as e:
             if (
-                self._jwt_manager_instance is not None
+                not isinstance(e, TwoFactorRequiredException)
+                and self._jwt_manager_instance is not None
                 and self._jwt_manager_instance.is_auto_refresh_enabled()
                 and self._refresh_token is not None
             ):
@@ -449,14 +520,48 @@ class CoCart:
         data: Optional[Dict[str, Any]] = None,
     ) -> Response:
         url = self._build_url(endpoint, params)
+
+        if method != "GET":
+            return self._perform_request(method, url, data)
+
+        # De-duplicate identical concurrent GETs (e.g. multiple threads
+        # requesting the same listing at once) so they share one network
+        # request instead of firing one each.
+        with self._inflight_lock:
+            inflight = self._inflight_gets.get(url)
+            is_leader = inflight is None
+            if is_leader:
+                inflight = _InFlightGet()
+                self._inflight_gets[url] = inflight
+
+        assert inflight is not None
+        if not is_leader:
+            inflight.event.wait()
+            if inflight.error is not None:
+                raise inflight.error
+            return cast(Response, inflight.response)
+
+        try:
+            response = self._perform_request(method, url, data)
+            inflight.response = response
+            return response
+        except BaseException as e:
+            inflight.error = e
+            raise
+        finally:
+            with self._inflight_lock:
+                self._inflight_gets.pop(url, None)
+            inflight.event.set()
+
+    def _perform_request(self, method: str, url: str, data: Optional[Dict[str, Any]] = None) -> Response:
         headers = self._build_headers()
         body = json.dumps(data) if data else None
 
         # ETag: add If-None-Match for GET requests
         if method == "GET" and self._etag_enabled:
-            cached_etag = self._etag_cache.get(url)
-            if cached_etag:
-                headers["If-None-Match"] = cached_etag
+            cached = self._etag_cache.get(url)
+            if cached:
+                headers["If-None-Match"] = cached["etag"]
 
         self._emit("request", {"method": method, "url": url, "headers": headers, "body": body})
 
@@ -492,14 +597,29 @@ class CoCart:
 
             duration = time.monotonic() - start_time
 
-            self._last_response = Response(http_resp.status_code, http_resp.headers, http_resp.body)
+            # A 304 has no body — reuse the body/headers cached alongside the
+            # ETag that produced the match, so callers still get the actual
+            # data instead of an empty response. Falls back to the live
+            # (empty) response if we somehow have no cache entry for this URL.
+            is_not_modified = method == "GET" and self._etag_enabled and http_resp.status_code == 304
+            cached_entry = self._etag_cache.get(url) if is_not_modified else None
+
+            self._last_response = Response(
+                http_resp.status_code,
+                cached_entry["headers"] if cached_entry else http_resp.headers,
+                cached_entry["body"] if cached_entry else http_resp.body,
+            )
             self._extract_cart_key(self._last_response)
 
-            # ETag: cache the ETag from the response
-            if method == "GET" and self._etag_enabled:
+            # ETag: cache the ETag + body from a fresh (non-304) response
+            if method == "GET" and self._etag_enabled and not is_not_modified:
                 etag = self._last_response.get_etag()
                 if etag:
-                    self._etag_cache[url] = etag
+                    self._etag_cache[url] = {
+                        "etag": etag,
+                        "body": http_resp.body,
+                        "headers": http_resp.headers,
+                    }
 
             # Retry on transient HTTP status codes (429, 503)
             if attempt < self._max_retries and self._is_retryable_status(http_resp.status_code):
@@ -565,15 +685,17 @@ class CoCart:
             encoded = b64encode(creds.encode()).decode()
             headers[self._auth_header_name] = f"Basic {encoded}"
 
-        # Cart key header
+        # Cart key header — send only the header name the configured plugin
+        # actually allows (mixing both breaks CORS preflight on real installs).
         if self._cart_key and not self.is_authenticated():
-            headers["Cart-Key"] = self._cart_key
+            cart_key_header = "CoCart-API-Cart-Key" if self._main_plugin == "legacy" else "Cart-Key"
+            headers[cart_key_header] = self._cart_key
 
         headers.update(self._custom_headers)
         return headers
 
     def _extract_cart_key(self, response: Response) -> None:
-        cart_key = response.get_header("Cart-Key")
+        cart_key = response.get_header("Cart-Key") or response.get_header("CoCart-API-Cart-Key")
         if cart_key is not None:
             self._cart_key = cart_key
             self._storage.set(self._storage_key, cart_key)
@@ -594,6 +716,10 @@ class CoCart:
         message = f"{context}{api_message}{code_label}"
 
         response_data = data if isinstance(data, dict) else {}
+
+        # 2FA challenge (must be checked before generic authentication handling)
+        if code == "cocart_2fa_required":
+            raise TwoFactorRequiredException(message, http_code, code, response_data)
 
         # Authentication errors
         if http_code in (401, 403) or (isinstance(code, str) and "authenticat" in code):
@@ -620,7 +746,11 @@ class CoCart:
                     return min(float(retry_after), 60.0)
                 except ValueError:
                     pass
-        return float(min(2 ** (attempt - 1), 30.0))
+        base = float(min(2 ** (attempt - 1), 30.0))
+        # ±20% jitter so many clients retrying at once don't re-collide on the
+        # same schedule (avoids synchronized retry storms against a rate limit).
+        jitter = 0.8 + random.random() * 0.4
+        return base * jitter
 
     def _apply_transformer(self, response: Response) -> Response:
         if self._response_transformer:

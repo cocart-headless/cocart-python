@@ -7,7 +7,7 @@ import time
 import pytest
 
 from cocart import CoCart
-from cocart.exceptions import AuthenticationException
+from cocart.exceptions import AuthenticationException, TwoFactorRequiredException
 from cocart.jwt_manager import JwtManager
 from cocart.storage.memory_storage import MemoryStorage
 from tests.mock_http_adapter import MockHttpAdapter
@@ -49,6 +49,38 @@ class TestJwtManagerLogin:
         jwt_mgr = JwtManager(client)
         with pytest.raises(AuthenticationException, match="JWT token not found"):
             jwt_mgr.login("user", "pass")
+
+    def test_login_requires_2fa(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        mock_adapter.queue(401, body=json.dumps({
+            "code": "cocart_2fa_required",
+            "message": "2FA code required",
+            "data": {
+                "available_providers": ["email", "totp"],
+                "default_provider": "totp",
+                "email_sent": True,
+            },
+        }))
+        jwt_mgr = JwtManager(client)
+        with pytest.raises(TwoFactorRequiredException) as exc_info:
+            jwt_mgr.login("user", "pass")
+        assert exc_info.value.available_providers == ["email", "totp"]
+        assert exc_info.value.default_provider == "totp"
+        assert exc_info.value.email_sent is True
+
+
+class TestJwtManagerVerifyTwoFactor:
+    def test_verify_two_factor_success(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        mock_adapter.queue(200, body=json.dumps({
+            "extras": {"jwt_token": "access123", "jwt_refresh": "refresh456"},
+        }))
+        jwt_mgr = JwtManager(client)
+        response = jwt_mgr.verify_two_factor("user", "pass", "123456", provider="totp")
+        assert response.is_successful()
+        assert client.get_jwt_token() == "access123"
+        assert client.get_refresh_token() == "refresh456"
+        body = json.loads(mock_adapter.last_request["body"])
+        assert body["2fa_code"] == "123456"
+        assert body["2fa_provider"] == "totp"
 
 
 class TestJwtManagerRefresh:

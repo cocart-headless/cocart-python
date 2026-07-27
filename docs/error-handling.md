@@ -4,9 +4,10 @@
 
 ```
 CoCartException (base)
-├── AuthenticationException   (401, 403)
-├── ValidationException       (400)
-└── VersionException          (CoCart Basic required)
+├── AuthenticationException      (401, 403)
+│   └── TwoFactorRequiredException  (2FA code required to complete login)
+├── ValidationException          (400)
+└── VersionException             (CoCart Basic required)
 ```
 
 All exceptions extend `cocart.exceptions.CoCartException`, which extends Python's built-in `Exception`.
@@ -173,6 +174,21 @@ except ValidationException as e:
     # e.error_code => "cocart_not_enough_in_stock"
     pass
 ```
+
+### Two-Factor Authentication Required
+
+```python
+from cocart.exceptions import TwoFactorRequiredException
+
+try:
+    client.login("customer@email.com", "password")
+except TwoFactorRequiredException as e:
+    # e.available_providers => ["email", "totp"]
+    # e.default_provider    => "email"
+    pass
+```
+
+See [Authentication](authentication.md#two-factor-authentication-2fa) for the full 2FA login flow.
 
 ### Invalid Input (Client-Side Validation)
 
