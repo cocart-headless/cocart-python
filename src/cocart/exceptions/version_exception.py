@@ -4,12 +4,12 @@ from cocart.exceptions.cocart_exception import CoCartException
 
 
 class VersionException(CoCartException):
-    """Raised when a method requires CoCart Basic but the legacy plugin is configured."""
+    """Raised when a method requires CoCart Starter but the legacy plugin is configured."""
 
     def __init__(self, method: str) -> None:
         super().__init__(
-            f"{method}() requires CoCart Basic. "
-            "Please upgrade from the legacy CoCart plugin to use this feature.",
+            f"{method}() requires CoCart Starter. "
+            "Please upgrade from the CoCart Community plugin to use this feature.",
             http_code=0,
             error_code="cocart_version_required",
         )

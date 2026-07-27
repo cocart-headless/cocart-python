@@ -262,7 +262,7 @@ class CoCart:
         return self
 
     def requires_basic(self, method: str) -> None:
-        """Guard that raises if a method requires CoCart Basic but the SDK is configured for legacy."""
+        """Guard that raises if a method requires CoCart Starter but the SDK is configured for legacy."""
         if self._main_plugin == "legacy":
             raise VersionException(method)
 

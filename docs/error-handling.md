@@ -7,7 +7,7 @@ CoCartException (base)
 ├── AuthenticationException      (401, 403)
 │   └── TwoFactorRequiredException  (2FA code required to complete login)
 ├── ValidationException          (400)
-└── VersionException             (CoCart Basic required)
+└── VersionException             (CoCart Starter required)
 ```
 
 All exceptions extend `cocart.exceptions.CoCartException`, which extends Python's built-in `Exception`.
@@ -96,7 +96,7 @@ See [Authentication](authentication.md#auto-refresh) for details.
 
 ## Version Exceptions
 
-When using the SDK in legacy mode, methods that require CoCart Basic raise `VersionException` immediately without making an HTTP request:
+When using the SDK in legacy mode, methods that require CoCart Starter raise `VersionException` immediately without making an HTTP request:
 
 ```python
 from cocart.exceptions import VersionException
@@ -106,7 +106,7 @@ client = CoCart("https://your-store.com", main_plugin="legacy")
 try:
     client.products().find_by_slug("blue-hoodie")
 except VersionException as e:
-    print(e)  # "products().find_by_slug() requires CoCart Basic..."
+    print(e)  # "products().find_by_slug() requires CoCart Starter..."
 ```
 
 ## HTTP Status Code Mapping

@@ -242,7 +242,7 @@ class Cart(Endpoint):
     def create(self) -> Response:
         """Create a new guest cart session without adding items.
 
-        Requires CoCart Basic.
+        Requires CoCart Starter.
         """
         self._client.requires_basic("cart().create")
         return self._post("")

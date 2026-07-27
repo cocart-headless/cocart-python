@@ -18,7 +18,7 @@ response = client.cart().create()
 cart_key = response.get("cart_key")  # "guest_abc123..."
 ```
 
-> **Note:** Only available for non-authenticated (guest) users. Requires CoCart Basic.
+> **Note:** Only available for non-authenticated (guest) users. Requires CoCart Starter.
 
 ## Get Cart
 

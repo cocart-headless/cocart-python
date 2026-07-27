@@ -26,7 +26,7 @@ class Products(Endpoint):
         return self._get(str(product_id), self._stringify_params(params or {}))
 
     def find_by_slug(self, slug: str, params: Optional[Dict[str, Any]] = None) -> Response:
-        """Get a single product by slug. Requires CoCart Basic."""
+        """Get a single product by slug. Requires CoCart Starter."""
         self._client.requires_basic("products().find_by_slug")
         return self._get(slug, self._stringify_params(params or {}))
 
@@ -51,7 +51,7 @@ class Products(Endpoint):
         return self.all(merged)
 
     def by_brand(self, brand_slug: str, params: Optional[Dict[str, Any]] = None) -> Response:
-        """Get products by brand. Requires CoCart Basic."""
+        """Get products by brand. Requires CoCart Starter."""
         self._client.requires_basic("products().by_brand")
         merged = dict(params or {})
         merged["brand"] = brand_slug
@@ -141,7 +141,7 @@ class Products(Endpoint):
         variation_id: int,
         params: Optional[Dict[str, str]] = None,
     ) -> Response:
-        """Get a specific variation. Requires CoCart Basic."""
+        """Get a specific variation. Requires CoCart Starter."""
         self._client.requires_basic("products().variation")
         return self._get(f"{product_id}/variations/{variation_id}", params)
 
@@ -152,7 +152,7 @@ class Products(Endpoint):
         return self._get("categories", params)
 
     def category(self, category_id: int, params: Optional[Dict[str, str]] = None) -> Response:
-        """Get a single category. Requires CoCart Basic."""
+        """Get a single category. Requires CoCart Starter."""
         self._client.requires_basic("products().category")
         return self._get(f"categories/{category_id}", params)
 
@@ -163,7 +163,7 @@ class Products(Endpoint):
         return self._get("tags", params)
 
     def tag(self, tag_id: int, params: Optional[Dict[str, str]] = None) -> Response:
-        """Get a single tag. Requires CoCart Basic."""
+        """Get a single tag. Requires CoCart Starter."""
         self._client.requires_basic("products().tag")
         return self._get(f"tags/{tag_id}", params)
 
@@ -191,12 +191,12 @@ class Products(Endpoint):
         return self._get(f"attributes/{attribute_id}/terms/{term_id}", params)
 
     def attribute_by_slug(self, slug: str, params: Optional[Dict[str, str]] = None) -> Response:
-        """Get an attribute by its slug. Requires CoCart Basic."""
+        """Get an attribute by its slug. Requires CoCart Starter."""
         self._client.requires_basic("products().attribute_by_slug")
         return self._get(f"attributes/{slug}", params)
 
     def attribute_terms_by_slug(self, slug: str, params: Optional[Dict[str, str]] = None) -> Response:
-        """Get terms for an attribute by the attribute's slug. Requires CoCart Basic."""
+        """Get terms for an attribute by the attribute's slug. Requires CoCart Starter."""
         self._client.requires_basic("products().attribute_terms_by_slug")
         return self._get(f"attributes/{slug}/terms", params)
 
@@ -206,19 +206,19 @@ class Products(Endpoint):
         term_slug: str,
         params: Optional[Dict[str, str]] = None,
     ) -> Response:
-        """Get a specific term by slug for an attribute by slug. Requires CoCart Basic."""
+        """Get a specific term by slug for an attribute by slug. Requires CoCart Starter."""
         self._client.requires_basic("products().attribute_term_by_slug")
         return self._get(f"attributes/{attr_slug}/terms/{term_slug}", params)
 
     # --- Brands ---
 
     def brands(self, params: Optional[Dict[str, str]] = None) -> Response:
-        """Get product brands. Requires CoCart Basic."""
+        """Get product brands. Requires CoCart Starter."""
         self._client.requires_basic("products().brands")
         return self._get("brands", params)
 
     def brand(self, brand_id: int, params: Optional[Dict[str, str]] = None) -> Response:
-        """Get a single brand. Requires CoCart Basic."""
+        """Get a single brand. Requires CoCart Starter."""
         self._client.requires_basic("products().brand")
         return self._get(f"brands/{brand_id}", params)
 
@@ -235,7 +235,7 @@ class Products(Endpoint):
         return self._get("reviews", merged)
 
     def my_reviews(self, params: Optional[Dict[str, str]] = None) -> Response:
-        """Get the current authenticated user's product reviews. Requires CoCart Basic."""
+        """Get the current authenticated user's product reviews. Requires CoCart Starter."""
         self._client.requires_basic("products().my_reviews")
         return self._get("reviews/mine", params)
 

@@ -112,7 +112,7 @@ client = (
 
 ## Legacy Plugin Support
 
-The SDK supports both **CoCart Basic** and the **legacy CoCart plugin** (`cart-rest-api-for-woocommerce` v4.x). By default, the SDK targets CoCart Basic.
+The SDK supports both **CoCart Starter** and the **CoCart Community plugin** (`cart-rest-api-for-woocommerce` v4.x). By default, the SDK targets CoCart Starter.
 
 To use the SDK with the legacy plugin, set `main_plugin` to `"legacy"`:
 
@@ -125,7 +125,7 @@ client.set_main_plugin("legacy")
 
 ### What changes in legacy mode
 
-**Basic-only methods raise immediately.** Methods that require CoCart Basic raise a `VersionException` before making any HTTP request:
+**Basic-only methods raise immediately.** Methods that require CoCart Starter raise a `VersionException` before making any HTTP request:
 
 ```python
 from cocart.exceptions import VersionException
@@ -135,7 +135,7 @@ client = CoCart("https://your-store.com", main_plugin="legacy")
 try:
     client.products().find_by_slug("blue-hoodie")
 except VersionException as e:
-    # "products().find_by_slug() requires CoCart Basic. Please upgrade..."
+    # "products().find_by_slug() requires CoCart Starter. Please upgrade..."
     print(e)
 ```
 
@@ -147,4 +147,4 @@ Basic-only methods include:
 * `products().brands()`, `brand()`, `by_brand()`
 * `products().my_reviews()`
 
-**Field filtering uses `fields` instead of `_fields`.** The legacy plugin uses CoCart's custom `fields` query parameter, while CoCart Basic uses the WordPress standard `_fields`. The SDK handles this automatically.
+**Field filtering uses `fields` instead of `_fields`.** The legacy plugin uses CoCart's custom `fields` query parameter, while CoCart Starter uses the WordPress standard `_fields`. The SDK handles this automatically.
