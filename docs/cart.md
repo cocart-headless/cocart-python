@@ -57,6 +57,9 @@ response = client.cart().add_item(123, quantity=2)
 
 # Shorthand
 response = client.cart().add(123, 2)
+
+# A SKU also works — the server resolves it to a product ID
+response = client.cart().add_item("BLUE-SHIRT-L", quantity=1)
 ```
 
 ### Add with Options

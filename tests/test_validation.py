@@ -23,9 +23,24 @@ class TestValidateProductId:
         with pytest.raises(ValidationException, match="Product ID"):
             validate_product_id(-1)
 
-    def test_invalid_string(self) -> None:
+    def test_accepts_non_numeric_string_as_potential_sku(self) -> None:
+        validate_product_id("abc")
+        validate_product_id("BLUE-SHIRT-L")
+        validate_product_id("123ABC")
+
+    def test_invalid_empty_string(self) -> None:
         with pytest.raises(ValidationException, match="Product ID"):
-            validate_product_id("abc")
+            validate_product_id("")
+        with pytest.raises(ValidationException, match="Product ID"):
+            validate_product_id("   ")
+
+    def test_invalid_numeric_string_not_positive_integer(self) -> None:
+        with pytest.raises(ValidationException, match="Product ID"):
+            validate_product_id("0")
+        with pytest.raises(ValidationException, match="Product ID"):
+            validate_product_id("-1")
+        with pytest.raises(ValidationException, match="Product ID"):
+            validate_product_id("1.5")
 
 
 class TestValidateQuantity:

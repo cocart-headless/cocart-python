@@ -198,10 +198,15 @@ while True:
 
 ## Single Product
 
-### By ID
+### By ID or SKU
+
+`find()` accepts either the numeric product/variation ID or the product's SKU — either one works the same way.
 
 ```python
 response = client.products().find(123)
+
+# Or by SKU
+response = client.products().find("PCT-2024")
 
 data = response.to_dict()
 print(data["name"])

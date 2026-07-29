@@ -47,6 +47,12 @@ class TestCartItems:
         with pytest.raises(ValidationException, match="Product ID"):
             client.cart().add_item(-1)
 
+    def test_add_item_accepts_sku(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        mock_adapter.queue(200, body='{"item_key": "abc"}')
+        client.cart().add_item("BLUE-SHIRT-L", 1)
+        body = json.loads(mock_adapter.last_request["body"])
+        assert body["id"] == "BLUE-SHIRT-L"
+
     def test_add_item_validates_quantity(self, client: CoCart) -> None:
         with pytest.raises(ValidationException, match="Quantity"):
             client.cart().add_item(1, 0)
@@ -268,3 +274,9 @@ class TestShorthands:
         body = json.loads(mock_adapter.last_request["body"])
         assert body["id"] == "99"
         assert body["variation"] == {"color": "red"}
+
+    def test_add_variation_accepts_sku(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        mock_adapter.queue(200, body='{}')
+        client.cart().add_variation("VAR-SKU-1", 1, {"color": "red"})
+        body = json.loads(mock_adapter.last_request["body"])
+        assert body["id"] == "VAR-SKU-1"

@@ -385,11 +385,11 @@ class Cart(Endpoint):
 
     def add_variation(
         self,
-        variation_id: int,
+        variation_id: Union[int, str],
         quantity: int = 1,
         attributes: Optional[Dict[str, str]] = None,
     ) -> Response:
-        """Shorthand: Add a variable product to cart."""
+        """Shorthand: Add a variable product to cart. `variation_id` accepts a SKU too."""
         return self.add_item(variation_id, quantity, variation=attributes or {})
 
     # --- Internal ---

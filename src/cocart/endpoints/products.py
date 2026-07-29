@@ -21,8 +21,12 @@ class Products(Endpoint):
         """Get all products."""
         return self._get("", self._stringify_params(params or {}))
 
-    def find(self, product_id: int, params: Optional[Dict[str, Any]] = None) -> Response:
-        """Get a single product by ID."""
+    def find(self, product_id: Union[int, str], params: Optional[Dict[str, Any]] = None) -> Response:
+        """Get a single product by ID or SKU.
+
+        ``GET /products/{id}`` accepts either the numeric product/variation
+        ID or the product's SKU in the same path segment.
+        """
         return self._get(str(product_id), self._stringify_params(params or {}))
 
     def find_by_slug(self, slug: str, params: Optional[Dict[str, Any]] = None) -> Response:

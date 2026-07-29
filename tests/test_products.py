@@ -31,6 +31,11 @@ class TestProductsRetrieval:
         client.products().find(42)
         assert "products/42" in mock_adapter.last_request["url"]
 
+    def test_find_accepts_sku(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        mock_adapter.queue(200, body='{"sku": "PCT-2024"}')
+        client.products().find("PCT-2024")
+        assert "products/PCT-2024" in mock_adapter.last_request["url"]
+
     def test_find_by_slug_requires_basic(self) -> None:
         c = CoCart("https://example.com", main_plugin="legacy")
         with pytest.raises(VersionException):
