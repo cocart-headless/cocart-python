@@ -9,6 +9,26 @@ if TYPE_CHECKING:
     from cocart.response import Response
 
 
+def document_query(params: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, str]]:
+    """The query for ``formatted``, ``meta_keys`` and any other values given,
+    as strings, or ``None`` when there are none.
+
+    A list is comma-joined, and a boolean is sent as ``"true"`` or ``"false"``.
+    ``None`` values are left out.
+    """
+    query: Dict[str, str] = {}
+    for key, value in (params or {}).items():
+        if value is None:
+            continue
+        if isinstance(value, bool):
+            query[key] = "true" if value else "false"
+        elif isinstance(value, (list, tuple)):
+            query[key] = ",".join(str(item) for item in value)
+        else:
+            query[key] = str(value)
+    return query or None
+
+
 class Endpoint:
     """Abstract base class for all endpoint classes.
 

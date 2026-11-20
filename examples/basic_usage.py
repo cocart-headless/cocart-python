@@ -25,8 +25,8 @@ client = CoCart("https://your-store.com")
 
 # Paginate products
 # for page in client.products().all_paginated({"per_page": 20}):
-#     for product in page.to_dict():
-#         print(product["name"])
+#     for product in page.get("products", []):
+#         print(product["name"], product["prices"]["price"])  # price in minor units, e.g. "1800"
 
 # Add item to cart
 # response = client.cart().add_item(42, quantity=2)
@@ -77,6 +77,8 @@ client = CoCart("https://your-store.com")
 # response.get_coupons()           # Applied coupons
 # response.get_customer()          # Customer details
 # response.get_currency()          # Currency info
-# response.get_shipping_methods()  # Shipping options
+# response.get_notices()           # Notices keyed by type: {"success": [...]}
+# response.get_shipping_methods()  # Shipping packages, each with its rates
+# response.get_fees()              # Fees as a list
 # response.is_successful()         # 2xx?
 # response.is_error()              # 4xx/5xx?

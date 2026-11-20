@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 from cocart.http.http_response import HttpResponse
+from cocart.http.safe_error_message import safe_error_message
 
 
 class HttpxAdapter:
@@ -39,15 +40,16 @@ class HttpxAdapter:
                 f"Request timed out after {timeout}s",
                 http_code=0,
                 error_code="request_timeout",
-            )
+            ) from None
         except httpx.ConnectError as e:
             from cocart.exceptions.cocart_exception import CoCartException
 
+            # Not chained: the original exception carries the full URL, query string (cart key) included.
             raise CoCartException(
-                f"Connection error: {e}",
+                f"Connection error: {safe_error_message(str(e))}",
                 http_code=0,
                 error_code="network_error",
-            )
+            ) from None
 
         resp_headers = {k.lower(): v for k, v in resp.headers.items()}
         return HttpResponse(

@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import threading
 import time
 from base64 import b64encode
 from typing import Any, Callable, Dict, List, Optional, Set, cast
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from cocart.exceptions.authentication_exception import AuthenticationException
 from cocart.exceptions.cocart_exception import CoCartException
@@ -15,10 +16,44 @@ from cocart.exceptions.two_factor_required_exception import TwoFactorRequiredExc
 from cocart.exceptions.validation_exception import ValidationException
 from cocart.exceptions.version_exception import VersionException
 from cocart.http.requests_adapter import RequestsAdapter
+from cocart.http.safe_error_message import safe_error_message
 from cocart.response import Response
 from cocart.storage.memory_storage import MemoryStorage
 
 logger = logging.getLogger("cocart")
+
+
+def _route_path(url: str) -> str:
+    """The REST route of a request URL for error messages: the path from
+    ``/wp-json`` on, with no host and no query string (which can hold the
+    cart key or API credentials).
+    """
+    path = urlsplit(url).path
+    i = path.find("/wp-json/")
+    return path[i + len("/wp-json"):] if i >= 0 else path
+
+
+def _redact_query(url: str) -> str:
+    """A URL for debug output, with every query value replaced by ``***``.
+
+    The query can hold the cart key, an order key, an email address or a
+    verification key, which mustn't end up in logs.
+    """
+    base, sep, query = str(url).partition("?")
+    if not sep:
+        return base
+    pairs = [pair.partition("=")[0] + "=***" if "=" in pair else pair for pair in query.split("&")]
+    return f"{base}?{'&'.join(pairs)}"
+
+
+_NOT_STORABLE = re.compile(r"(^|[\s,])(no-store|private)([\s,;=]|$)", re.IGNORECASE)
+
+
+def _may_store(cache_control: Optional[str]) -> bool:
+    """Whether a response may be kept in the ETag cache: not when
+    ``Cache-Control`` says ``no-store`` or ``private`` (CoCart Plus sends that
+    with checkout, order and account responses)."""
+    return not cache_control or not _NOT_STORABLE.search(cache_control)
 
 
 class _InFlightGet:
@@ -69,7 +104,7 @@ class CoCart:
         self._response_transformer: Optional[Callable[[Response], Response]] = None
         self._etag_enabled: bool = kwargs.get("etag", True)
         self._etag_cache: Dict[str, Dict[str, Any]] = {}
-        self._main_plugin: str = kwargs.get("main_plugin", "basic")
+        self._main_plugin: str = kwargs.get("main_plugin", "starter")
         self._verify_ssl: bool = kwargs.get("verify_ssl", True)
         self._last_response: Optional[Response] = None
 
@@ -90,6 +125,7 @@ class CoCart:
         self._store_instance: Any = None
         self._sessions_instance: Any = None
         self._account_instance: Any = None
+        self._checkout_instance: Any = None
 
         # Handle auth kwargs
         username = kwargs.get("username")
@@ -102,6 +138,15 @@ class CoCart:
         if consumer_key and consumer_secret:
             self._consumer_key = consumer_key
             self._consumer_secret = consumer_secret
+
+        # Pick up the cart key kept by the storage adapter (e.g. FileStorage)
+        # from an earlier run, so the same cart continues on its own.
+        if self._cart_key is None:
+            try:
+                self.restore_session()
+            except Exception:
+                # Storage unavailable: start without a cart key.
+                pass
 
     @staticmethod
     def create(store_url: str) -> CoCart:
@@ -189,8 +234,7 @@ class CoCart:
         self._auth = None
         self._jwt_token = None
         self._refresh_token = None
-        self._cart_key = None
-        self._storage.delete(self._storage_key)
+        self._forget_cart_key()
         return self
 
     def transfer_cart_to_customer(self, username: str, password: str) -> Response:
@@ -261,7 +305,7 @@ class CoCart:
         self._main_plugin = plugin
         return self
 
-    def requires_basic(self, method: str) -> None:
+    def requires_starter(self, method: str) -> None:
         """Guard that raises if a method requires CoCart Starter but the SDK is configured for legacy."""
         if self._main_plugin == "legacy":
             raise VersionException(method)
@@ -280,6 +324,11 @@ class CoCart:
         """Register an event listener.
 
         Supported events: ``request``, ``response``, ``error``, ``retry``, ``auth:refresh``.
+        ``response`` carries the ``Response`` as ``response``.
+
+        The payloads carry the full request URL, query string included, which
+        can hold the cart key, an order key or an email address: don't forward
+        it to logs or analytics as it is.
         """
         if event not in self._listeners:
             self._listeners[event] = set()
@@ -303,19 +352,20 @@ class CoCart:
 
     def _log_debug(self, event: str, data: Dict[str, Any]) -> None:
         prefix = "[CoCart]"
+        url = _redact_query(str(data.get("url", "")))
         if event == "request":
-            logger.debug("%s %s %s", prefix, data.get("method"), data.get("url"))
+            logger.debug("%s %s %s", prefix, data.get("method"), url)
         elif event == "response":
             logger.debug(
                 "%s %s %s -> %s (%.0fms)",
                 prefix,
                 data.get("method"),
-                data.get("url"),
+                url,
                 data.get("status"),
                 data.get("duration", 0) * 1000,
             )
         elif event == "error":
-            logger.debug("%s %s %s -> Error: %s", prefix, data.get("method"), data.get("url"), data.get("error"))
+            logger.debug("%s %s %s -> Error: %s", prefix, data.get("method"), url, data.get("error"))
         elif event == "retry":
             logger.debug(
                 "%s Retry %s/%s after %.0fms (%s)",
@@ -339,7 +389,11 @@ class CoCart:
         return self._jwt_manager_instance
 
     def restore_session(self) -> None:
-        """Restore the cart key from storage."""
+        """Restore the cart key from storage.
+
+        The constructor already does this, so you only need it after
+        swapping the storage with :meth:`set_storage`.
+        """
         if self._cart_key is None:
             stored = self._storage.get(self._storage_key)
             if stored:
@@ -381,6 +435,14 @@ class CoCart:
 
             self._account_instance = Account(self)
         return self._account_instance
+
+    def checkout(self) -> Any:
+        """Checkout endpoint (CoCart Plus 2.0): place orders and take payment."""
+        if self._checkout_instance is None:
+            from cocart.endpoints.checkout import Checkout
+
+            self._checkout_instance = Checkout(self)
+        return self._checkout_instance
 
     # --- Batch ---
 
@@ -449,7 +511,30 @@ class CoCart:
 
         If a JwtManager with auto-refresh is attached and the request fails
         with an authentication error, the token is refreshed and retried once.
+
+        If a guest's cart no longer exists (CoCart Starter 5 refuses the cart
+        key with ``cocart_invalid_cart``, for example after the cart expired),
+        the stored cart key is forgotten and the request retried once as a
+        new guest.
         """
+        try:
+            return self._request_with_auth_refresh(method, endpoint, params, data)
+        except CoCartException as e:
+            # The stored guest cart no longer exists (e.g. it expired). CoCart
+            # refuses the request before running it, so forget the key and
+            # retry once as a new guest.
+            if e.error_code != "cocart_invalid_cart" or self._cart_key is None or self.is_authenticated():
+                raise
+            self._forget_cart_key()
+        return self._request_with_auth_refresh(method, endpoint, params, data)
+
+    def _request_with_auth_refresh(
+        self,
+        method: str,
+        endpoint: str,
+        params: Optional[Dict[str, str]] = None,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> Response:
         try:
             return self._execute_request(method, endpoint, params, data)
         except AuthenticationException as e:
@@ -474,33 +559,65 @@ class CoCart:
         route: str,
         params: Optional[Dict[str, str]] = None,
         data: Optional[Dict[str, Any]] = None,
+        omit_cart_key: bool = False,
     ) -> Response:
         """Make an HTTP request using a full REST route (relative to wp-json/).
 
-        Does NOT prepend the namespace/version prefix.
+        Does NOT prepend the namespace/version prefix. Emits the same
+        ``request``, ``response`` and ``error`` events as other requests, but
+        is never sent again (no retries): a raw request can take payment.
+
+        Args:
+            omit_cart_key: Send the request without the cart key, for routes
+                that refuse one (``products/{id}/shipping-rates``).
         """
         url = f"{self._store_url}/{self._rest_prefix}/{route.lstrip('/')}"
 
         if params:
             url += "?" + urlencode(params)
 
-        headers = self._build_headers()
+        headers = self._build_headers(include_cart_key=not omit_cart_key)
         body = json.dumps(data) if data else None
 
-        http_resp = self._http_adapter.request(
-            method=method,
-            url=url,
-            headers=headers,
-            body=body,
-            timeout=self._timeout,
-            verify_ssl=self._verify_ssl,
-        )
+        # The same events as the other requests, so debug output and listeners
+        # see the CoCart Plus routes too. Never sent again: a raw request can
+        # take payment.
+        self._emit("request", {"method": method, "url": url, "headers": headers, "body": body})
+        start_time = time.monotonic()
+
+        try:
+            http_resp = self._http_adapter.request(
+                method=method,
+                url=url,
+                headers=headers,
+                body=body,
+                timeout=self._timeout,
+                verify_ssl=self._verify_ssl,
+            )
+        except CoCartException as e:
+            self._emit("error", {"method": method, "url": url, "error": e})
+            raise
+        except Exception as e:
+            # Not chained: the original exception's message and request
+            # carry the full URL, query string (cart key) included.
+            error = CoCartException(safe_error_message(str(e)), http_code=0, error_code="network_error")
+            self._emit("error", {"method": method, "url": url, "error": error})
+            raise error from None
 
         self._last_response = Response(http_resp.status_code, http_resp.headers, http_resp.body)
         self._extract_cart_key(self._last_response)
 
+        self._emit("response", {
+            "method": method, "url": url, "status": http_resp.status_code,
+            "duration": time.monotonic() - start_time, "response": self._last_response,
+        })
+
         if http_resp.status_code >= 400:
-            self._handle_error_response(self._last_response)
+            try:
+                self._handle_error_response(self._last_response, method, url)
+            except CoCartException as e:
+                self._emit("error", {"method": method, "url": url, "error": e})
+                raise
 
         return self._apply_transformer(self._last_response)
 
@@ -579,7 +696,10 @@ class CoCart:
                     verify_ssl=self._verify_ssl,
                 )
             except CoCartException as e:
-                if attempt < self._max_retries and self._is_transient_error(e):
+                # Only a GET is sent again: a request that changes something may have
+                # run before the connection dropped, and running it twice could, for
+                # example, charge a card twice.
+                if attempt < self._max_retries and method == "GET" and self._is_transient_error(e):
                     attempt += 1
                     delay = self._get_retry_delay(attempt)
                     self._emit("retry", {
@@ -591,9 +711,11 @@ class CoCart:
                 self._emit("error", {"method": method, "url": url, "error": e})
                 raise
             except Exception as e:
-                error = CoCartException(str(e), http_code=0, error_code="network_error")
+                # Not chained: the original exception's message and request
+                # carry the full URL, query string (cart key) included.
+                error = CoCartException(safe_error_message(str(e)), http_code=0, error_code="network_error")
                 self._emit("error", {"method": method, "url": url, "error": error})
-                raise error from e
+                raise error from None
 
             duration = time.monotonic() - start_time
 
@@ -612,7 +734,12 @@ class CoCart:
             self._extract_cart_key(self._last_response)
 
             # ETag: cache the ETag + body from a fresh (non-304) response
-            if method == "GET" and self._etag_enabled and not is_not_modified:
+            if (
+                method == "GET"
+                and self._etag_enabled
+                and not is_not_modified
+                and _may_store(self._last_response.get_header("Cache-Control"))
+            ):
                 etag = self._last_response.get_etag()
                 if etag:
                     self._etag_cache[url] = {
@@ -621,8 +748,8 @@ class CoCart:
                         "headers": http_resp.headers,
                     }
 
-            # Retry on transient HTTP status codes (429, 503)
-            if attempt < self._max_retries and self._is_retryable_status(http_resp.status_code):
+            # Retry on transient HTTP status codes (429, and 503 for a GET)
+            if attempt < self._max_retries and self._is_retryable_status(method, http_resp.status_code):
                 attempt += 1
                 delay = self._get_retry_delay(attempt, self._last_response)
                 self._emit("retry", {
@@ -633,15 +760,14 @@ class CoCart:
                 time.sleep(delay)
                 continue
 
-            if http_resp.status_code >= 400:
-                self._emit("response", {
-                    "method": method, "url": url, "status": http_resp.status_code, "duration": duration,
-                })
-                self._handle_error_response(self._last_response, method, url)
-
             self._emit("response", {
                 "method": method, "url": url, "status": http_resp.status_code, "duration": duration,
+                "response": self._last_response,
             })
+
+            if http_resp.status_code >= 400:
+                self._handle_error_response(self._last_response, method, url)
+
             return self._apply_transformer(self._last_response)
 
     def _build_url(self, endpoint: str, params: Optional[Dict[str, str]] = None) -> str:
@@ -666,7 +792,7 @@ class CoCart:
 
         return url
 
-    def _build_headers(self) -> Dict[str, str]:
+    def _build_headers(self, include_cart_key: bool = True) -> Dict[str, str]:
         headers: Dict[str, str] = {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -687,8 +813,8 @@ class CoCart:
 
         # Cart key header — send only the header name the configured plugin
         # actually allows (mixing both breaks CORS preflight on real installs).
-        if self._cart_key and not self.is_authenticated():
-            cart_key_header = "CoCart-API-Cart-Key" if self._main_plugin == "legacy" else "Cart-Key"
+        if include_cart_key and self._cart_key and not self.is_authenticated():
+            cart_key_header ="CoCart-API-Cart-Key" if self._main_plugin == "legacy" else "Cart-Key"
             headers[cart_key_header] = self._cart_key
 
         headers.update(self._custom_headers)
@@ -699,6 +825,10 @@ class CoCart:
         if cart_key is not None:
             self._cart_key = cart_key
             self._storage.set(self._storage_key, cart_key)
+
+    def _forget_cart_key(self) -> None:
+        self._cart_key = None
+        self._storage.delete(self._storage_key)
 
     def _handle_error_response(
         self,
@@ -711,7 +841,11 @@ class CoCart:
         api_message = data.get("message", "An unknown error occurred") if isinstance(data, dict) else "An unknown error occurred"
         http_code = response.status_code
 
-        context = f"{method} {url}: " if method and url else ""
+        # "POST /cocart/v2/cart/add-item: Product not found [cocart_product_not_found]".
+        # Route only: the full URL's query string can carry the cart key and
+        # consumer key/secret, which must never end up in a message an app
+        # logs or displays.
+        context = f"{method} {_route_path(url)}: " if method and url else ""
         code_label = f" [{code}]" if code != "unknown_error" else ""
         message = f"{context}{api_message}{code_label}"
 
@@ -725,6 +859,12 @@ class CoCart:
         if http_code in (401, 403) or (isinstance(code, str) and "authenticat" in code):
             raise AuthenticationException(message, http_code, code, response_data)
 
+        # A refused state (409), a rate limit (429) or the server's fault (5xx)
+        # is never a validation error, whatever its code says (e.g.
+        # ``cocart_order_invalid_status`` is a 409).
+        if http_code in (409, 429) or http_code >= 500:
+            raise CoCartException(message, http_code, code, response_data)
+
         # Validation errors
         if http_code == 400 or (isinstance(code, str) and ("invalid" in code or "missing" in code)):
             raise ValidationException(message, http_code, code, response_data)
@@ -735,12 +875,18 @@ class CoCart:
         msg = str(e).lower()
         return "timeout" in msg or "timed out" in msg or "connection" in msg
 
-    def _is_retryable_status(self, status: int) -> bool:
-        return status in (429, 503)
+    def _is_retryable_status(self, method: str, status: int) -> bool:
+        # A 429 is refused before the request runs, so any method can be sent
+        # again. A 503 can come from a proxy after the store has run the
+        # request, so only a GET is.
+        return status == 429 or (status == 503 and method == "GET")
 
     def _get_retry_delay(self, attempt: int, response: Optional[Response] = None) -> float:
         if response:
-            retry_after = response.get_header("Retry-After")
+            # CoCart Plus sends RateLimit-Retry-After; a proxy may send Retry-After.
+            retry_after = response.get_header("RateLimit-Retry-After")
+            if retry_after is None:
+                retry_after = response.get_header("Retry-After")
             if retry_after is not None:
                 try:
                     return min(float(retry_after), 60.0)

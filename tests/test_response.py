@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from cocart.response import Response
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 
 class TestDataAccess:
@@ -87,7 +90,7 @@ class TestCartHelpers:
         "fees": [{"name": "Service", "fee": "100"}],
         "cross_sells": [{"id": 5, "name": "Related"}],
         "totals": {"subtotal": "1000", "total": "1500"},
-        "notices": [{"type": "success", "message": "Added"}],
+        "notices": {"success": ["Added"]},
     })
 
     def test_cart_key_from_header(self) -> None:
@@ -146,7 +149,87 @@ class TestCartHelpers:
 
     def test_notices(self) -> None:
         r = Response(200, {}, self.CART_BODY)
-        assert len(r.get_notices()) == 1
+        assert r.get_notices() == {"success": ["Added"]}
+
+
+def recorded_cart() -> Response:
+    """A cart recorded from CoCart Starter 5."""
+    with open(FIXTURES / "cart.json", encoding="utf-8") as f:
+        return Response(200, {}, f.read())
+
+
+class TestCartShapes:
+    """Cart shapes CoCart sends (recorded from CoCart Starter 5)."""
+
+    def test_shipping_methods_lists_the_packages_from_shipping_packages(self) -> None:
+        packages = recorded_cart().get_shipping_methods()
+        assert isinstance(packages, list)
+        assert len(packages) == 1
+        assert packages[0]["package_name"] == "Shipment"
+        assert "flat_rate:1" in packages[0]["rates"]
+
+    def test_get_shipping_returns_the_whole_shipping_field(self) -> None:
+        shipping = recorded_cart().get_shipping()
+        assert shipping is not None
+        assert shipping["has_calculated_shipping"] is True
+        assert "default" in shipping["packages"]
+
+    def test_shipping_methods_accepts_a_plain_list_and_is_empty_without_shipping(self) -> None:
+        assert len(Response(200, {}, '{"shipping": [{"package_name": "A"}]}').get_shipping_methods()) == 1
+        assert Response(200, {}, '{"items": []}').get_shipping_methods() == []
+        assert Response(200, {}, '{"items": []}').get_shipping() is None
+
+    def test_fees_lists_fees_keyed_by_fee_id(self) -> None:
+        body = json.dumps({"fees": {
+            "gift-wrap": {"name": "Gift wrap", "fee": "500"},
+            "handling": {"name": "Handling", "fee": "150"},
+        }})
+        assert Response(200, {}, body).get_fees() == [
+            {"name": "Gift wrap", "fee": "500"},
+            {"name": "Handling", "fee": "150"},
+        ]
+
+    def test_fees_are_empty_for_empty_maps(self) -> None:
+        assert Response(200, {}, '{"fees": {}}').get_fees() == []
+        assert Response(200, {}, '{"fees": []}').get_fees() == []
+        assert recorded_cart().get_fees() == []
+
+    def test_notices_are_keyed_by_type(self) -> None:
+        r = Response(200, {}, '{"notices": {"success": ["Item added"], "notice": ["Quantity reduced"]}}')
+        assert r.get_notices() == {"success": ["Item added"], "notice": ["Quantity reduced"]}
+
+    def test_notices_are_empty_when_there_are_none(self) -> None:
+        # CoCart Starter 5 sends {}, CoCart 4.x sends [].
+        assert recorded_cart().get_notices() == {}
+        assert Response(200, {}, '{"notices": []}').get_notices() == {}
+        assert Response(200, {}, '{"items": []}').get_notices() == {}
+
+    def test_extensions(self) -> None:
+        recurring = {"abc": {"totals": {"period": "/ month", "subtotal": "1000", "total": "1000"}}}
+        r = Response(200, {}, json.dumps({"extensions": {"recurring_totals": recurring}}))
+        assert r.get_extensions()["recurring_totals"] == recurring
+        assert Response(200, {}, '{"extensions": []}').get_extensions() == {}
+        assert Response(200, {}, '{"items": []}').get_extensions() == {}
+        assert recorded_cart().get_extensions() == {}
+
+
+class TestRateLimit:
+    def test_reads_the_rate_limit_headers(self) -> None:
+        r = Response(200, {"RateLimit-Limit": "25", "ratelimit-remaining": "24", "RateLimit-Reset": "1791108883"}, "{}")
+        assert r.get_rate_limit() == {"limit": 25, "remaining": 24, "reset": 1791108883, "retry_after": None}
+
+    def test_reads_retry_after(self) -> None:
+        r = Response(429, {"RateLimit-Remaining": "0", "RateLimit-Retry-After": "30"}, "{}")
+        assert r.get_rate_limit()["retry_after"] == 30
+        assert r.get_rate_limit()["remaining"] == 0
+
+    def test_is_all_none_without_the_headers(self) -> None:
+        assert Response(200, {}, "{}").get_rate_limit() == {
+            "limit": None, "remaining": None, "reset": None, "retry_after": None,
+        }
+
+    def test_ignores_values_that_are_not_numbers(self) -> None:
+        assert Response(200, {"RateLimit-Limit": "abc", "RateLimit-Reset": ""}, "{}").get_rate_limit()["limit"] is None
 
 
 class TestTaxHelpers:

@@ -11,7 +11,19 @@ products = client.products()
 ```python
 response = client.products().all()
 response = client.products().all({"per_page": 20, "page": 1})
+
+# The list is under `products`, with the page count alongside
+products = response.get("products", [])
+total_pages = response.get("total_pages")
 ```
+
+Product responses carry a lot for headless pages (related products, embedded variations with price and stock, upsells, cross-sells, stock, extension meta). For a listing that needs less, ask for just those fields; CoCart then skips building the rest:
+
+```python
+response = client.products().all({"per_page": 20, "_fields": "id,name,slug,prices,images,add_to_cart"})
+```
+
+Prices are minor-unit strings under `prices` (`"1800"` for 18.00; see `CurrencyFormatter` in [Utilities](utilities.md)), image `src` is a dict of sizes (`thumbnail`, `medium`, `full`…), and `attributes` is keyed by attribute (`attribute_pa_color`).
 
 ## Parameters Reference
 
@@ -30,7 +42,7 @@ All list methods accept an optional `params` dict with these query parameters:
 | `min_price` | str | Minimum price |
 | `max_price` | str | Maximum price |
 | `stock_status` | str | Stock status (`instock`, `outofstock`, `onbackorder`) |
-| `orderby` | str | Sort field (`date`, `id`, `title`, `slug`, `price`, `popularity`, `rating`) |
+| `orderby` | str | Sort order: `date`, `id`, `menu_order`, `include`, `title`, `slug`, `name`, `alphabetical`, `reverse_alpha`, `popularity`, `sales`, `rating`, `review_count`, `by_stock`, `on_sale_first`, `featured_first`, `price_asc`, `price_desc`; `relevance` and `rand` need CoCart Starter |
 | `order` | str | Sort direction (`asc`, `desc`) |
 
 ## Filtering
@@ -43,7 +55,7 @@ response = client.products().by_category("electronics")
 # With additional params
 response = client.products().by_category("electronics", {
     "per_page": 20,
-    "orderby": "price",
+    "orderby": "price_asc",
     "order": "asc",
 })
 ```
@@ -128,11 +140,11 @@ response = client.products().paginate(2, 12)
 ### Sort Helper
 
 ```python
-# Cheapest first
-response = client.products().sort_by("price")
+# Cheapest first (CoCart rejects plain "price": use price_asc or price_desc)
+response = client.products().sort_by("price_asc")
 
 # Most expensive first
-response = client.products().sort_by("price", "desc")
+response = client.products().sort_by("price_desc")
 
 # Newest first
 response = client.products().sort_by("date", "desc")
@@ -144,7 +156,7 @@ response = client.products().sort_by("popularity", "desc")
 response = client.products().sort_by("rating", "desc")
 
 # Combine with other filters
-response = client.products().sort_by("price", "asc", {
+response = client.products().sort_by("price_asc", "asc", {
     "category": "electronics",
     "on_sale": True,
 })
@@ -156,7 +168,7 @@ response = client.products().sort_by("price", "asc", {
 response = client.products().all({
     "page": 1,
     "per_page": 10,
-    "orderby": "price",
+    "orderby": "price_asc",
     "order": "asc",
 })
 ```
@@ -167,8 +179,8 @@ The SDK provides a `Paginator` that implements Python's iterator protocol. Use i
 
 ```python
 for page in client.products().all_paginated({"per_page": 20}):
-    for product in page.to_dict():
-        print(f"{product['name']} - ${product['price']}")
+    for product in page.get("products", []):
+        print(f"{product['name']} - {product['prices']['price']}")  # minor units, e.g. "1800"
 ```
 
 Or collect all pages into a list:
@@ -185,11 +197,11 @@ per_page = 20
 
 while True:
     response = client.products().paginate(page, per_page)
-    products = response.to_dict()
+    products = response.get("products", [])
     total_pages = response.get_total_pages()
 
     for product in products:
-        print(f"{product['name']} - ${product['price']}")
+        print(f"{product['name']} - {product['prices']['price']}")
 
     if total_pages is None or page >= total_pages:
         break
@@ -210,7 +222,7 @@ response = client.products().find("PCT-2024")
 
 data = response.to_dict()
 print(data["name"])
-print(data["price"])
+print(data["prices"]["price"])  # minor units, e.g. "1800"
 print(data["description"])
 ```
 
@@ -228,7 +240,7 @@ response = client.products().find_by_slug("blue-hoodie")
 response = client.products().variations(123)
 
 for variation in response.to_dict():
-    print(f"{variation['id']}: {variation['price']}")
+    print(f"{variation['id']}: {variation['prices']['price']}")
 ```
 
 ### Get a Specific Variation
@@ -236,6 +248,26 @@ for variation in response.to_dict():
 ```python
 response = client.products().variation(123, 456)
 ```
+
+## Shipping Rates for a Product
+
+> Requires the CoCart Plus plugin.
+
+Shipping rates for a product before it's added to the cart, priced for the store's (or the customer's) location. Pass a variation ID, or the parent with the variation's attributes:
+
+```python
+response = client.products().shipping_rates(154, quantity=2)
+response = client.products().shipping_rates(134, variation={
+    "attribute_pa_color": "blue",
+    "attribute_logo": "Yes",
+})
+
+for package in response.get("packages", {}).values():
+    for rate in package["rates"].values():
+        print(f"{rate['label']}: {rate['cost']}")  # cost in minor units
+```
+
+The request is sent without the cart key (the route prices a simulated cart and refuses one, `400 cocart_calculate_product_shipping_rates_cart_access_denied`). External and grouped products can't be priced (`400`).
 
 ## Categories
 
@@ -329,7 +361,7 @@ response = client.products().by_brand("nike")
 # With additional params
 response = client.products().by_brand("nike", {
     "per_page": 20,
-    "orderby": "price",
+    "orderby": "price_asc",
     "order": "asc",
 })
 ```
@@ -346,6 +378,18 @@ response = client.products().reviews()
 
 ```python
 response = client.products().product_reviews(123)
+```
+
+### Post a Review
+
+```python
+response = client.products().create_review({
+    "product_id": 123,
+    "review": "Warm and well made.",
+    "rating": 5,
+    "reviewer": "Jane",                  # guests
+    "reviewer_email": "jane@example.com",
+})
 ```
 
 ### My Reviews
@@ -407,18 +451,18 @@ All methods return a `Response` object:
 ```python
 response = client.products().all({"per_page": 5})
 
-# As dict
-products = response.to_dict()
+# As dict: {"products": [...], "page": 1, "total_pages": 6, "total_products": 28}
+data = response.to_dict()
 
 # Check success
 if response.is_successful():
-    for product in response.to_dict():
+    for product in response.get("products", []):
         print(product["name"])
 
 # Access nested data with dot notation
 response = client.products().find(123)
 print(response.get("name"))
-print(response.get("price"))
+print(response.get("prices.price"))
 print(response.get("categories.0.name"))
 ```
 

@@ -3,11 +3,12 @@
 ## Exception Hierarchy
 
 ```
-CoCartException (base)
+CoCartException (base)                (409, 429, 5xx and anything else)
 ├── AuthenticationException      (401, 403)
 │   └── TwoFactorRequiredException  (2FA code required to complete login)
 ├── ValidationException          (400)
-└── VersionException             (CoCart Starter required)
+├── VersionException             (CoCart Starter required)
+└── CheckoutOutcomeUnknownException  (place_order() doesn't know how the checkout ended)
 ```
 
 All exceptions extend `cocart.exceptions.CoCartException`, which extends Python's built-in `Exception`.
@@ -41,14 +42,20 @@ except CoCartException as e:
 
 ## Exception Attributes
 
-All exceptions provide these attributes:
+All exceptions provide these attributes and methods:
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `args[0]` / `str(e)` | `str` | Human-readable error message from the API |
+| `args[0]` / `str(e)` | `str` | Error message: the request's method and route, the API's message and its code |
 | `error_code` | `str \| None` | API error code (e.g. `cocart_product_not_found`) |
 | `http_code` | `int` | HTTP status code (400, 401, 403, 500, etc.) |
 | `response_data` | `dict` | Full API response body for debugging |
+| `get_cart()` | `dict \| None` | The cart sent with the error (see [Item No Longer in the Cart](#item-no-longer-in-the-cart)), or `None` |
+| `get_fields()` | `dict` | Every field at fault, by path, with its message (see [Fields at Fault](#fields-at-fault)); `{}` when the error isn't about fields |
+| `get_field()` | `str \| None` | The first field at fault (`data.field`), e.g. `billing.postcode` |
+| `get_reason()` | `str \| None` | The underlying plugin's own reason (`data.reason`), when there is one |
+
+API error messages name the request's method and route, CoCart Plus routes (`request_raw()`) included, e.g. `POST /cocart/v2/cart/add-item: Product not found. [cocart_product_not_found]`. It never includes the full URL: its query string can carry the cart key or API credentials, so an app can log or show messages safely. Connection errors (`network_error`) lose the query string too, and don't chain the HTTP library's original exception, which holds the full URL.
 
 ## Inspecting the Full API Response
 
@@ -62,6 +69,19 @@ except CoCartException as e:
     data = e.response_data
     # e.g. {"code": "cocart_product_not_found", "message": "...", "data": {...}}
     print(data)
+```
+
+## Fields at Fault
+
+CoCart Plus checks a whole form at once, so one error reports every field at fault (`data.fields`), by path:
+
+```python
+try:
+    client.checkout().update({"billing_address": address})
+except CoCartException as e:
+    e.get_fields()  # {"billing.postcode": "Enter a valid postcode.", "billing.phone": "Enter a phone number."}
+    e.get_field()   # "billing.postcode": the first one
+    e.get_reason()  # the underlying plugin's own reason, or None
 ```
 
 ## Expired JWT Tokens
@@ -117,7 +137,11 @@ except VersionException as e:
 | 401 | `AuthenticationException` | Missing or invalid credentials |
 | 403 | `AuthenticationException` | Expired JWT token, insufficient permissions |
 | 404 | `CoCartException` | Endpoint not found, item key not found |
-| 500 | `CoCartException` | Server error |
+| 409 | `CoCartException` | A refused state: an order that can't be paid or cancelled, a payment still in progress, a checkout total that changed |
+| 429 | `CoCartException` | Rate limited |
+| 5xx | `CoCartException` | Server error |
+
+A 409, 429 or 5xx is always a plain `CoCartException`, whatever its code says (`cocart_order_invalid_status` is a 409, not a validation error). For other statuses not listed, a code containing `invalid` or `missing` gives a `ValidationException`, and one containing `authenticat` an `AuthenticationException`.
 
 ## Response Error Helpers
 
@@ -160,7 +184,7 @@ response.get_total_pages()    # Total number of pages
 try:
     client.cart().add_item(999999, quantity=1)
 except ValidationException as e:
-    # str(e) => "Product not found"
+    # str(e) => "POST /cocart/v2/cart/add-item: Product not found. [cocart_product_not_found]"
     # e.error_code => "cocart_product_not_found"
     pass
 ```
@@ -174,6 +198,46 @@ except ValidationException as e:
     # e.error_code => "cocart_not_enough_in_stock"
     pass
 ```
+
+### Expired Cart Key
+
+CoCart Starter 5 refuses a cart key with no cart session on every cart route (`404 cocart_invalid_cart`), for example after the cart expired. The client then forgets the stored key (in its storage too) and retries the request once as a new guest, so this error doesn't reach your code for a guest; a fresh cart key comes back as usual.
+
+If a `SessionManager` keeps the cart key in a storage the client doesn't have, save the new key there with `session.set_cart_key(client.get_cart_key())`. See [Sessions](sessions.md).
+
+### Item No Longer in the Cart
+
+Getting, updating or removing an item whose key isn't in the cart (for example, another tab already removed it) fails with `404 cocart_item_not_in_cart`. Since CoCart Starter 5 the error carries the cart as it is now, so you can show it without fetching the cart again.
+
+```python
+try:
+    client.cart().update_item(item_key, 2)
+except CoCartException as e:
+    if e.error_code == "cocart_item_not_in_cart":
+        cart = e.get_cart()  # the current cart, or None with CoCart 4.x
+        if cart is not None:
+            render(cart)
+```
+
+### Quantity Reduced to the Maximum
+
+Adding more than the purchase limit or the stock allows isn't an error: CoCart adds the maximum and says so with a notice.
+
+```python
+response = client.cart().add_item(123, quantity=50)
+notices = response.get_notices().get("notice", [])  # ['The quantity of "Beanie" was reduced to 5, the most allowed in the cart.']
+```
+
+### Rate Limits
+
+With rate limiting on (CoCart Plus), every response carries `RateLimit-*` headers:
+
+```python
+rate_limit = response.get_rate_limit()
+# {"limit": 25, "remaining": 24, "reset": 1791108883, "retry_after": None}
+```
+
+`reset` is the Unix time the window resets, and `retry_after` the seconds to wait after a 429. Exceeding the limit returns 429 `rate_limit_exceeded`, which the client retries when `max_retries` is set, waiting as long as `RateLimit-Retry-After` says (or a proxy's `Retry-After`), up to 60 seconds. `request_raw()` (the CoCart Plus routes, such as checkout) never retries.
 
 ### Two-Factor Authentication Required
 

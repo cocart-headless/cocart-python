@@ -36,6 +36,11 @@ storage = FileStorage("/tmp/cocart-sessions")
 client = CoCart("https://your-store.com", storage=storage)
 ```
 
+The client saves each cart key the store sends, and reads it back when it's created, so the next run continues the same cart. A `cart_key` passed to the constructor takes precedence. If the cart has expired in the meantime, the client replaces it with a new one on its own (see [Error Handling](error-handling.md#expired-cart-key)).
+
+> [!WARNING]
+> A storage holds one cart key. In a web app serving many customers, don't share one storage (or one `storage_key`) between them, or a customer's client would pick up another customer's cart. Give each visitor their own `storage_key`, or keep the cart key in their session and pass it as `cart_key`.
+
 ### Resuming with a Known Cart Key
 
 If you already have a cart key (e.g. stored in your own database), pass it directly:

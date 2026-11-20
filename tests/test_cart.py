@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -177,24 +178,99 @@ class TestCartBulk:
         client.cart().get_item_count()
         assert "items/count" in mock_adapter.last_request["url"]
 
-    def test_create_requires_basic(self) -> None:
+    def test_create_requires_starter(self) -> None:
         c = CoCart("https://example.com", main_plugin="legacy")
         with pytest.raises(VersionException):
             c.cart().create()
 
 
 class TestCartCoupons:
-    def test_apply_coupon(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+    def test_apply_coupon_sends_code(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        # CoCart Plus requires `code`; `coupon` is rejected as a missing parameter.
         mock_adapter.queue(200, body='{}')
         client.cart().apply_coupon("SAVE10")
-        body = json.loads(mock_adapter.last_request["body"])
-        assert body["coupon"] == "SAVE10"
+        assert mock_adapter.last_request["method"] == "POST"
+        assert urlsplit(mock_adapter.last_request["url"]).path == "/wp-json/cocart/v2/cart/apply-coupon"
+        assert json.loads(mock_adapter.last_request["body"]) == {"code": "SAVE10"}
+
+    def test_apply_coupon_with_email(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        mock_adapter.queue(200, body='{}')
+        client.cart().apply_coupon("VIP", "jane@example.com")
+        assert json.loads(mock_adapter.last_request["body"]) == {"code": "VIP", "email": "jane@example.com"}
 
     def test_remove_coupon(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
         mock_adapter.queue(200, body='{}')
         client.cart().remove_coupon("SAVE10")
         assert mock_adapter.last_request["method"] == "DELETE"
         assert "coupons/SAVE10" in mock_adapter.last_request["url"]
+
+    def test_remove_coupon_encodes_the_code(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        for code in ["summer sale", "10%off", "a#b?c", "café"]:
+            client.cart().remove_coupon(code)
+        assert [urlsplit(r["url"]).path for r in mock_adapter.requests] == [
+            "/wp-json/cocart/v2/cart/coupons/summer%20sale",
+            "/wp-json/cocart/v2/cart/coupons/10%25off",
+            "/wp-json/cocart/v2/cart/coupons/a%23b%3Fc",
+            "/wp-json/cocart/v2/cart/coupons/caf%C3%A9",
+        ]
+        assert all(r["method"] == "DELETE" for r in mock_adapter.requests)
+
+    def test_remove_coupons(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        client.cart().remove_coupons()
+        assert mock_adapter.last_request["method"] == "DELETE"
+        assert urlsplit(mock_adapter.last_request["url"]).path == "/wp-json/cocart/v2/cart/coupons"
+
+    def test_check_coupons(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        client.cart().check_coupons()
+        assert mock_adapter.last_request["method"] == "GET"
+        assert urlsplit(mock_adapter.last_request["url"]).path == "/wp-json/cocart/v2/cart/coupons/validate"
+        assert "email" not in mock_adapter.last_request["url"]
+
+    def test_check_coupons_with_email(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        client.cart().check_coupons("jane@example.com")
+        assert "email=jane%40example.com" in mock_adapter.last_request["url"]
+
+
+class TestCartPlusRoutes:
+    def test_get_mini(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        client.cart().get_mini({"_fields": "items"})
+        assert mock_adapter.last_request["method"] == "GET"
+        url = mock_adapter.last_request["url"]
+        assert urlsplit(url).path == "/wp-json/cocart/v2/cart/mini"
+        assert "_fields=items" in url
+
+    def test_remove_all_items(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        client.cart().remove_all_items()
+        assert mock_adapter.last_request["method"] == "DELETE"
+        assert urlsplit(mock_adapter.last_request["url"]).path == "/wp-json/cocart/v2/cart/items"
+
+    def test_add_item_sends_plugin_choices(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        client.cart().add_item(306, 1, convert_to_sub="1_month")
+        client.cart().add_item(302, 1, recipient_email="friend@example.com")
+        client.cart().add_item(154, 1, item_data={"warranty": "1-year"})
+        bodies = [json.loads(r["body"]) for r in mock_adapter.requests]
+        assert bodies[0]["convert_to_sub"] == "1_month"
+        assert bodies[1]["recipient_email"] == "friend@example.com"
+        assert bodies[2]["item_data"] == {"warranty": "1-year"}
+
+    def test_change_plan(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        client.cart().change_plan("abc123", "1_month")
+        assert mock_adapter.last_request["method"] == "POST"
+        assert urlsplit(mock_adapter.last_request["url"]).path == "/wp-json/cocart/v2/cart/update"
+        assert json.loads(mock_adapter.last_request["body"]) == {
+            "namespace": "update-item-schema",
+            "item_key": "abc123",
+            "convert_to_sub": "1_month",
+        }
+
+    def test_change_plan_to_one_time(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        client.cart().change_plan("abc123", "0")
+        assert json.loads(mock_adapter.last_request["body"])["convert_to_sub"] == "0"
+
+    def test_change_plan_requires_an_item_key(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        with pytest.raises(ValidationException, match="item key"):
+            client.cart().change_plan("", "0")
+        assert mock_adapter.requests == []
 
 
 class TestCartCustomer:
@@ -256,8 +332,20 @@ class TestCartFees:
         client.cart().add_fee("Rush", 5.99, taxable=True)
         body = json.loads(mock_adapter.last_request["body"])
         assert body["name"] == "Rush"
-        assert body["amount"] == 5.99
+        # CoCart Plus takes the amount as a string; a number is rejected.
+        assert body["amount"] == "5.99"
         assert body["taxable"] is True
+        assert "tax_class" not in body
+        assert urlsplit(mock_adapter.last_request["url"]).path == "/wp-json/cocart/v2/cart/add-fee"
+
+    def test_add_fee_with_tax_class(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        client.cart().add_fee("Gift wrap", 2.5, True, "reduced-rate")
+        assert json.loads(mock_adapter.last_request["body"]) == {
+            "name": "Gift wrap",
+            "amount": "2.5",
+            "taxable": True,
+            "tax_class": "reduced-rate",
+        }
 
 
 class TestShorthands:

@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import tempfile
 
-import pytest
 
 from cocart.storage.file_storage import FileStorage
 from cocart.storage.memory_storage import MemoryStorage

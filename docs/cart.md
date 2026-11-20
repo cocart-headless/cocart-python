@@ -75,6 +75,8 @@ response = client.cart().add_item(123, quantity=1,
 )
 ```
 
+With CoCart Plus, the options also carry a subscription plan (`convert_to_sub`), a gift recipient (`recipient_email`) or a warranty (`item_data={"warranty": ...}`), and `change_plan(item_key, value)` switches a cart item's plan. See [Extension Data](extension-data.md#sending-the-customers-choices).
+
 ### Add a Variable Product
 
 ```python
@@ -208,6 +210,26 @@ response = client.cart().clear()
 response = client.cart().empty()
 ```
 
+### Remove All Items, Keep the Rest
+
+> Requires the CoCart Plus plugin.
+
+Removes every item but keeps the cart's coupons, fees and customer details (`DELETE /cart/items`):
+
+```python
+response = client.cart().remove_all_items()
+```
+
+### Mini Cart
+
+> Requires the CoCart Plus plugin.
+
+A lighter cart response for a header or drawer:
+
+```python
+response = client.cart().get_mini()
+```
+
 ### Calculate Totals
 
 ```python
@@ -226,11 +248,13 @@ response = client.cart().update({
 
 ### Get Totals
 
+> `get_totals()` is a separate request to its own totals endpoint, not part of a regular cart fetch. It returns the full breakdown WooCommerce calculates, including `cart_contents_total` and the taxes per tax rate (`shipping_taxes`, `cart_contents_taxes`, `fee_taxes`).
+
 ```python
-# Raw values
+# Minor-unit strings, like the cart: {"total": "125500", ...}
 response = client.cart().get_totals()
 
-# Formatted with currency (HTML)
+# Formatted with the currency: {"total": "$1,255.00", ...}
 response = client.cart().get_totals(html=True)
 ```
 
@@ -242,16 +266,24 @@ response = client.cart().get_item_count()
 
 ## Coupons
 
+> Requires the CoCart Plus plugin.
+
 ### Apply a Coupon
 
 ```python
 response = client.cart().apply_coupon("SUMMER20")
+
+# A coupon restricted to certain emails, before the cart knows the customer's
+response = client.cart().apply_coupon("VIP10", "jane@example.com")
 ```
 
 ### Remove a Coupon
 
 ```python
 response = client.cart().remove_coupon("SUMMER20")
+
+# Remove every coupon
+response = client.cart().remove_coupons()
 ```
 
 ### Get Applied Coupons
@@ -264,6 +296,9 @@ response = client.cart().get_coupons()
 
 ```python
 response = client.cart().check_coupons()
+
+# Including email restrictions
+response = client.cart().check_coupons("jane@example.com")
 ```
 
 ## Customer Details
@@ -319,13 +354,22 @@ response = client.cart().get_customer()
 
 ```python
 response = client.cart().get_shipping_methods()
+
+# CoCart keys the packages by package ID under `shipping.packages`;
+# get_shipping_methods() on the response lists them, each with its `rates`.
+for package in response.get_shipping_methods():
+    for rate_id, rate in package["rates"].items():
+        print(f"{rate_id}: {rate['label']} ({rate['cost']})")  # cost in minor units, e.g. "500"
+
+# The whole field: total_packages, has_calculated_shipping, packages
+shipping = response.get_shipping()
 ```
 
 ### Set Shipping Method
 
-Select a shipping rate for a package (requires CoCart Plus). Pass a
-`package_id` to restrict the selection to one package; omit it to apply the
-rate to every package.
+Select a shipping rate for a package (requires CoCart Plus) by its `rate_id`
+(found in a shipping package's `rates` map). Pass a `package_id` to restrict
+the selection to one package; omit it to apply the rate to every package.
 
 ```python
 response = client.cart().set_shipping_method("flat_rate:1")
@@ -354,10 +398,15 @@ response = client.cart().calculate()
 
 ## Fees
 
+> Requires the CoCart Plus plugin.
+
 ### Get Cart Fees
 
 ```python
 response = client.cart().get_fees()
+
+# The cart keys fees by fee ID; get_fees() lists them: [{"name": "Gift wrap", "fee": "500"}]
+fees = response.get_fees()
 ```
 
 ### Add a Fee
@@ -368,6 +417,9 @@ response = client.cart().add_fee("Rush Processing", 9.99)
 
 # Taxable fee
 response = client.cart().add_fee("Gift Wrapping", 4.99, taxable=True)
+
+# Taxable, with a tax class
+response = client.cart().add_fee("Gift Wrapping", 4.99, taxable=True, tax_class="reduced-rate")
 ```
 
 ### Remove All Fees
@@ -397,10 +449,18 @@ one request:
 ```python
 response = client.batch([
     {"method": "POST", "path": "/cocart/v2/cart/add-item", "body": {"id": "123", "quantity": "2"}},
-    {"method": "POST", "path": "/cocart/v2/cart/apply-coupon", "body": {"coupon": "SUMMER20"}},
+    {"method": "POST", "path": "/cocart/v2/cart/apply-coupon", "body": {"code": "SUMMER20"}},
     {"method": "DELETE", "path": "/cocart/v2/cart/item/abc123def456..."},
 ])
 ```
+
+The cart returned is the one from the last sub-request that succeeded, with every sub-request's notices merged. A sub-request that failed shows up as an `error` notice, so read the notices to see what didn't apply:
+
+```python
+failed = response.get_notices().get("error", [])  # e.g. ['Coupon "SUMMER2O" does not exist!']
+```
+
+If every sub-request fails, or the batch mixes in other routes, the response is WordPress's standard batch list (`responses`, one per sub-request, with its own `status`).
 
 ## Working with Responses
 
@@ -424,8 +484,15 @@ cart_key = response.get_cart_key()
 # Cart hash
 hash = response.get_cart_hash()
 
-# Notices
+# Notices, keyed by type: {"success": ["..."], "error": ["..."]}, or {} when there are none
 notices = response.get_notices()
+
+# Shipping packages as a list, and fees as a list (the cart keys both by ID)
+packages = response.get_shipping_methods()
+fees = response.get_fees()
+
+# Data plugins add to the cart, e.g. subscription recurring_totals (see extension-data.md)
+extensions = response.get_extensions()
 
 # Tax lines (normalized to a flat list regardless of the server's shape)
 taxes = response.get_taxes()
@@ -450,6 +517,8 @@ json_str = response.to_json()
 The SDK automatically handles ETags for reduced bandwidth and faster responses. This is enabled by default.
 
 When a response includes an `ETag` header, the SDK stores it in memory. On subsequent GET requests to the same URL, the SDK sends the stored ETag via the `If-None-Match` header. If the data hasn't changed, the server returns a `304 Not Modified` response with an empty body instead of the full payload.
+
+A response whose `Cache-Control` says `no-store` or `private` is never kept, so a customer's checkout, orders or account (which CoCart Plus marks that way) don't stay in memory.
 
 ```python
 client = CoCart("https://your-store.com")

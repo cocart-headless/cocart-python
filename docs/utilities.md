@@ -84,7 +84,7 @@ print(f"Total: {formatter.format(totals['total'], currency)}")
 
 WooCommerce stores dates in the store's configured timezone (often UTC). `TimezoneHelper` converts these to any other timezone.
 
-> **Note:** Timezone conversion requires the `zoneinfo` module (Python 3.9+). On Windows, install the `tzdata` package: `pip install tzdata`
+> **Note:** Timezone conversion uses the standard `zoneinfo` module. On Windows, install the `tzdata` package: `pip install tzdata`
 
 ### Setup
 

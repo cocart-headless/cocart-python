@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from urllib.parse import parse_qs, urlsplit
+
 import pytest
 
 from cocart import CoCart
@@ -36,7 +39,7 @@ class TestProductsRetrieval:
         client.products().find("PCT-2024")
         assert "products/PCT-2024" in mock_adapter.last_request["url"]
 
-    def test_find_by_slug_requires_basic(self) -> None:
+    def test_find_by_slug_requires_starter(self) -> None:
         c = CoCart("https://example.com", main_plugin="legacy")
         with pytest.raises(VersionException):
             c.products().find_by_slug("my-product")
@@ -77,9 +80,10 @@ class TestProductsSearch:
 
     def test_sort_by(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
         mock_adapter.queue(200, body="[]")
-        client.products().sort_by("price", "desc")
+        # CoCart rejects `price`: sort by price with price_asc or price_desc.
+        client.products().sort_by("price_desc", "desc")
         url = mock_adapter.last_request["url"]
-        assert "orderby=price" in url
+        assert "orderby=price_desc" in url
         assert "order=desc" in url
 
     def test_by_stock_status(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
@@ -114,7 +118,7 @@ class TestProductsVariations:
         client.products().variations(42)
         assert "42/variations" in mock_adapter.last_request["url"]
 
-    def test_variation_requires_basic(self) -> None:
+    def test_variation_requires_starter(self) -> None:
         c = CoCart("https://example.com", main_plugin="legacy")
         with pytest.raises(VersionException):
             c.products().variation(42, 1)
@@ -143,12 +147,12 @@ class TestProductsTaxonomies:
 
 
 class TestProductsBrands:
-    def test_brands_requires_basic(self) -> None:
+    def test_brands_requires_starter(self) -> None:
         c = CoCart("https://example.com", main_plugin="legacy")
         with pytest.raises(VersionException):
             c.products().brands()
 
-    def test_by_brand_requires_basic(self) -> None:
+    def test_by_brand_requires_starter(self) -> None:
         c = CoCart("https://example.com", main_plugin="legacy")
         with pytest.raises(VersionException):
             c.products().by_brand("nike")
@@ -165,10 +169,55 @@ class TestProductsReviews:
         client.products().product_reviews(42)
         assert "product=42" in mock_adapter.last_request["url"]
 
-    def test_my_reviews_requires_basic(self) -> None:
+    def test_my_reviews_requires_starter(self) -> None:
         c = CoCart("https://example.com", main_plugin="legacy")
         with pytest.raises(VersionException):
             c.products().my_reviews()
+
+    def test_create_review(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        data = {"product_id": 42, "review": "Great", "rating": 5, "reviewer": "Jane", "reviewer_email": "j@x.com"}
+        client.products().create_review(data)
+        assert mock_adapter.last_request["method"] == "POST"
+        assert urlsplit(mock_adapter.last_request["url"]).path == "/wp-json/cocart/v2/products/reviews"
+        assert json.loads(mock_adapter.last_request["body"]) == data
+
+
+class TestProductsShippingRates:
+    def test_sent_without_the_cart_key(self, mock_adapter: MockHttpAdapter) -> None:
+        # The route prices a simulated cart and refuses a cart key (403).
+        c = CoCart("https://example.com", cart_key="t_guest_key")
+        c._http_adapter = mock_adapter  # type: ignore[assignment]
+        c.products().shipping_rates(154, quantity=2)
+
+        request = mock_adapter.last_request
+        assert request["method"] == "GET"
+        assert urlsplit(request["url"]).path == "/wp-json/cocart/v2/products/154/shipping-rates"
+        assert parse_qs(urlsplit(request["url"]).query) == {"quantity": ["2"]}
+        assert "Cart-Key" not in request["headers"]
+
+        # Other requests keep the cart key.
+        c.products().find(154)
+        assert "cart_key=t_guest_key" in mock_adapter.last_request["url"]
+        assert mock_adapter.last_request["headers"]["Cart-Key"] == "t_guest_key"
+
+    def test_variation_item_data_and_sku(self, client: CoCart, mock_adapter: MockHttpAdapter) -> None:
+        client.products().shipping_rates(
+            "HOODIE/BLUE",
+            variation={"attribute_pa_color": "blue"},
+            item_data={"engraving": "Hi"},
+        )
+        url = mock_adapter.last_request["url"]
+        assert urlsplit(url).path == "/wp-json/cocart/v2/products/HOODIE%2FBLUE/shipping-rates"
+        assert parse_qs(urlsplit(url).query) == {
+            "variation[attribute_pa_color]": ["blue"],
+            "item_data[engraving]": ["Hi"],
+        }
+
+    def test_custom_namespace(self, mock_adapter: MockHttpAdapter) -> None:
+        c = CoCart("https://example.com", namespace="mystore")
+        c._http_adapter = mock_adapter  # type: ignore[assignment]
+        c.products().shipping_rates(154)
+        assert mock_adapter.last_request["url"] == "https://example.com/wp-json/mystore/v2/products/154/shipping-rates"
 
 
 class TestProductsSEO:

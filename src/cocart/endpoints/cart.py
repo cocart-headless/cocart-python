@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
+from urllib.parse import quote
 
 from cocart.endpoints.endpoint import Endpoint
 from cocart.exceptions.validation_exception import ValidationException
@@ -39,9 +40,15 @@ class Cart(Endpoint):
         """Add an item to the cart.
 
         Args:
-            product_id: Product ID or variation ID.
+            product_id: Product ID, variation ID or SKU.
             quantity: Quantity to add.
-            **options: Additional options (variation, item_data, etc.).
+            **options: Additional options: ``variation`` (attributes of a
+                variable product), ``item_data`` (custom data), ``email``,
+                ``price``, ``return_item``, and the choices for CoCart Plus's
+                supported plugins: ``convert_to_sub`` (a subscription plan's
+                ``value``, ``"0"`` for one-time), ``recipient_email`` (a
+                gift's recipient) and ``item_data={"warranty": key}`` (a
+                warranty option). Other plugins' fields pass through as given.
         """
         validate_product_id(product_id)
         validate_quantity(quantity)
@@ -244,7 +251,7 @@ class Cart(Endpoint):
 
         Requires CoCart Starter.
         """
-        self._client.requires_basic("cart().create")
+        self._client.requires_starter("cart().create")
         return self._post("")
 
     def get_items(self, params: Optional[Dict[str, str]] = None) -> Response:
@@ -259,23 +266,88 @@ class Cart(Endpoint):
         """Update the entire cart."""
         return self._post("update", data)
 
+    def change_plan(self, item_key: str, value: str) -> Response:
+        """Switch a cart item to another subscription plan, or to one-time
+        with ``"0"`` (CoCart Plus).
+
+        The options are in the item's ``extensions["subscription_schemes"]``;
+        send one's ``value``. Posts the ``update-item-schema`` callback on
+        ``POST /cart/update``.
+
+        Example::
+
+            item = client.cart().get().get_items()[0]
+            options = item["extensions"].get("subscription_schemes", [])
+            option = next((o for o in options if not o["selected"]), None)
+            if option:
+                client.cart().change_plan(item["item_key"], option["value"])
+
+        Args:
+            item_key: The cart item's key.
+            value: The option's ``value``.
+        """
+        if not item_key:
+            raise ValidationException(
+                "change_plan() requires an item key.",
+                http_code=0,
+                error_code="cocart_missing_item_key",
+            )
+        return self.update({
+            "namespace": "update-item-schema",
+            "item_key": item_key,
+            "convert_to_sub": str(value),
+        })
+
+    def get_mini(self, params: Optional[Dict[str, str]] = None) -> Response:
+        """A lighter cart response for a mini cart (CoCart Plus)."""
+        return self._get("mini", params)
+
+    def remove_all_items(self) -> Response:
+        """Remove every item but keep the cart's coupons, fees and customer
+        details (CoCart Plus, ``DELETE /cart/items``). :meth:`clear` empties
+        the whole cart.
+        """
+        return self._delete("items")
+
     # --- Coupons ---
 
-    def apply_coupon(self, coupon_code: str) -> Response:
-        """Apply a coupon to the cart."""
-        return self._post("apply-coupon", {"coupon": coupon_code})
+    def apply_coupon(self, coupon_code: str, email: Optional[str] = None) -> Response:
+        """Apply a coupon to the cart (CoCart Plus).
+
+        Pass the customer's ``email`` for coupons restricted to certain emails
+        when the cart doesn't know it yet.
+        """
+        # CoCart Plus's apply-coupon route takes `code` (`coupon` is rejected as a missing parameter).
+        data: Dict[str, Any] = {"code": coupon_code}
+        if email:
+            data["email"] = email
+        return self._post("apply-coupon", data)
 
     def remove_coupon(self, coupon_code: str) -> Response:
-        """Remove a coupon from the cart."""
-        return self._delete(f"coupons/{coupon_code}")
+        """Remove a coupon from the cart.
+
+        The code goes in the URL path, so it's encoded: codes can contain
+        spaces, ``%``, ``#``, ``?`` and other characters. A code containing
+        ``/`` can't be removed by code (CoCart Plus matches any path segment
+        without ``/``); :meth:`remove_coupons` removes all of them instead.
+        """
+        return self._delete(f"coupons/{quote(coupon_code, safe='')}")
+
+    def remove_coupons(self) -> Response:
+        """Remove every coupon from the cart (CoCart Plus)."""
+        return self._delete("coupons")
 
     def get_coupons(self) -> Response:
         """Get applied coupons."""
         return self._get("", {"_fields": "coupons"})
 
-    def check_coupons(self) -> Response:
-        """Check if applied coupons are still valid."""
-        return self._get("coupons/validate")
+    def check_coupons(self, email: Optional[str] = None) -> Response:
+        """Check if applied coupons are still valid (CoCart Plus).
+
+        Pass the customer's ``email`` to check coupons restricted to certain
+        emails.
+        """
+        return self._get("coupons/validate", {"email": email} if email else None)
 
     # --- Customer ---
 
@@ -325,7 +397,11 @@ class Cart(Endpoint):
     # --- Shipping ---
 
     def get_shipping_methods(self) -> Response:
-        """Get available shipping methods."""
+        """Get the cart's shipping packages and their rates.
+
+        Read them with :meth:`Response.get_shipping_methods` (a list of
+        packages) or :meth:`Response.get_shipping` (the whole field).
+        """
         return self._get("", {"_fields": "shipping"})
 
     def set_shipping_method(self, rate_id: str, package_id: Optional[str] = None) -> Response:
@@ -363,9 +439,26 @@ class Cart(Endpoint):
         """Get cart fees."""
         return self._get("", {"_fields": "fees"})
 
-    def add_fee(self, name: str, amount: float, taxable: bool = False) -> Response:
-        """Add a fee to the cart."""
-        return self._post("add-fee", {"name": name, "amount": amount, "taxable": taxable})
+    def add_fee(
+        self,
+        name: str,
+        amount: float,
+        taxable: bool = False,
+        tax_class: Optional[str] = None,
+    ) -> Response:
+        """Add a fee to the cart (CoCart Plus).
+
+        Args:
+            name: Fee name.
+            amount: Fee amount, e.g. ``2.5``.
+            taxable: Whether the fee is taxable.
+            tax_class: The tax class to use when the fee is taxable.
+        """
+        # CoCart Plus takes the amount as a string (a number is rejected as rest_invalid_param).
+        data: Dict[str, Any] = {"name": name, "amount": str(amount), "taxable": taxable}
+        if tax_class:
+            data["tax_class"] = tax_class
+        return self._post("add-fee", data)
 
     def remove_fees(self) -> Response:
         """Remove all fees from the cart."""

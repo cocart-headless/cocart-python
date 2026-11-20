@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, Union
+from urllib.parse import quote
 
 from cocart.endpoints.endpoint import Endpoint
+from cocart.exceptions.cocart_exception import CoCartException
 from cocart.paginator import Paginator
 from cocart.response import Response
+from cocart.types import ProductOrderBy, SortOrder
 
 
 class Products(Endpoint):
@@ -31,7 +34,7 @@ class Products(Endpoint):
 
     def find_by_slug(self, slug: str, params: Optional[Dict[str, Any]] = None) -> Response:
         """Get a single product by slug. Requires CoCart Starter."""
-        self._client.requires_basic("products().find_by_slug")
+        self._client.requires_starter("products().find_by_slug")
         return self._get(slug, self._stringify_params(params or {}))
 
     # --- Search & Filter ---
@@ -56,7 +59,7 @@ class Products(Endpoint):
 
     def by_brand(self, brand_slug: str, params: Optional[Dict[str, Any]] = None) -> Response:
         """Get products by brand. Requires CoCart Starter."""
-        self._client.requires_basic("products().by_brand")
+        self._client.requires_starter("products().by_brand")
         merged = dict(params or {})
         merged["brand"] = brand_slug
         return self.all(merged)
@@ -89,11 +92,22 @@ class Products(Endpoint):
 
     def sort_by(
         self,
-        field: str,
-        order: str = "asc",
+        field: ProductOrderBy,
+        order: SortOrder = "asc",
         params: Optional[Dict[str, Any]] = None,
     ) -> Response:
-        """Get products sorted by a field."""
+        """Get products sorted by a field.
+
+        Args:
+            field: One of the sort orders CoCart accepts: ``date``, ``id``,
+                ``menu_order``, ``include``, ``title``, ``slug``, ``name``,
+                ``alphabetical``, ``reverse_alpha``, ``popularity``, ``sales``,
+                ``rating``, ``review_count``, ``by_stock``, ``on_sale_first``,
+                ``featured_first``, ``price_asc``, ``price_desc``, and with
+                CoCart Starter ``relevance`` and ``rand``. Sort by price with
+                ``price_asc`` or ``price_desc``: CoCart rejects ``price``.
+            order: ``asc`` or ``desc``.
+        """
         merged = dict(params or {})
         merged["orderby"] = field
         merged["order"] = order
@@ -146,7 +160,7 @@ class Products(Endpoint):
         params: Optional[Dict[str, str]] = None,
     ) -> Response:
         """Get a specific variation. Requires CoCart Starter."""
-        self._client.requires_basic("products().variation")
+        self._client.requires_starter("products().variation")
         return self._get(f"{product_id}/variations/{variation_id}", params)
 
     # --- Categories ---
@@ -157,7 +171,7 @@ class Products(Endpoint):
 
     def category(self, category_id: int, params: Optional[Dict[str, str]] = None) -> Response:
         """Get a single category. Requires CoCart Starter."""
-        self._client.requires_basic("products().category")
+        self._client.requires_starter("products().category")
         return self._get(f"categories/{category_id}", params)
 
     # --- Tags ---
@@ -168,7 +182,7 @@ class Products(Endpoint):
 
     def tag(self, tag_id: int, params: Optional[Dict[str, str]] = None) -> Response:
         """Get a single tag. Requires CoCart Starter."""
-        self._client.requires_basic("products().tag")
+        self._client.requires_starter("products().tag")
         return self._get(f"tags/{tag_id}", params)
 
     # --- Attributes ---
@@ -196,12 +210,12 @@ class Products(Endpoint):
 
     def attribute_by_slug(self, slug: str, params: Optional[Dict[str, str]] = None) -> Response:
         """Get an attribute by its slug. Requires CoCart Starter."""
-        self._client.requires_basic("products().attribute_by_slug")
+        self._client.requires_starter("products().attribute_by_slug")
         return self._get(f"attributes/{slug}", params)
 
     def attribute_terms_by_slug(self, slug: str, params: Optional[Dict[str, str]] = None) -> Response:
         """Get terms for an attribute by the attribute's slug. Requires CoCart Starter."""
-        self._client.requires_basic("products().attribute_terms_by_slug")
+        self._client.requires_starter("products().attribute_terms_by_slug")
         return self._get(f"attributes/{slug}/terms", params)
 
     def attribute_term_by_slug(
@@ -211,19 +225,19 @@ class Products(Endpoint):
         params: Optional[Dict[str, str]] = None,
     ) -> Response:
         """Get a specific term by slug for an attribute by slug. Requires CoCart Starter."""
-        self._client.requires_basic("products().attribute_term_by_slug")
+        self._client.requires_starter("products().attribute_term_by_slug")
         return self._get(f"attributes/{attr_slug}/terms/{term_slug}", params)
 
     # --- Brands ---
 
     def brands(self, params: Optional[Dict[str, str]] = None) -> Response:
         """Get product brands. Requires CoCart Starter."""
-        self._client.requires_basic("products().brands")
+        self._client.requires_starter("products().brands")
         return self._get("brands", params)
 
     def brand(self, brand_id: int, params: Optional[Dict[str, str]] = None) -> Response:
         """Get a single brand. Requires CoCart Starter."""
-        self._client.requires_basic("products().brand")
+        self._client.requires_starter("products().brand")
         return self._get(f"brands/{brand_id}", params)
 
     # --- Reviews ---
@@ -238,10 +252,59 @@ class Products(Endpoint):
         merged["product"] = str(product_id)
         return self._get("reviews", merged)
 
+    def create_review(self, data: Dict[str, Any]) -> Response:
+        """Post a product review.
+
+        Args:
+            data: ``product_id``, ``review``, ``rating`` (1-5), and for a guest
+                ``reviewer`` and ``reviewer_email``.
+        """
+        return self._post("reviews", data)
+
     def my_reviews(self, params: Optional[Dict[str, str]] = None) -> Response:
         """Get the current authenticated user's product reviews. Requires CoCart Starter."""
-        self._client.requires_basic("products().my_reviews")
+        self._client.requires_starter("products().my_reviews")
         return self._get("reviews/mine", params)
+
+    # --- Shipping rates ---
+
+    def shipping_rates(
+        self,
+        product_id: Union[int, str],
+        quantity: Optional[int] = None,
+        variation: Optional[Dict[str, str]] = None,
+        item_data: Optional[Dict[str, Any]] = None,
+    ) -> Response:
+        """Shipping rates for a product before it's added to the cart (CoCart Plus).
+
+        ``product_id`` may be a variation ID or a SKU. Sent without the cart
+        key: the route prices a simulated cart and refuses one
+        (``400 cocart_calculate_product_shipping_rates_cart_access_denied``).
+        External and grouped products can't be priced (``400``).
+
+        Args:
+            product_id: Product ID, variation ID or SKU.
+            quantity: Quantity to price.
+            variation: Attributes of a variable product, e.g.
+                ``{"attribute_pa_color": "blue"}``.
+            item_data: Custom item data, as sent when adding the item.
+        """
+        query: Dict[str, str] = {}
+        if quantity is not None:
+            query["quantity"] = str(quantity)
+        for key, value in (variation or {}).items():
+            query[f"variation[{key}]"] = str(value)
+        for key, value in (item_data or {}).items():
+            query[f"item_data[{key}]"] = str(value)
+
+        route = (
+            f"{self._client.get_namespace()}/{self._client.API_VERSION}/products/"
+            f"{quote(str(product_id), safe='')}/shipping-rates"
+        )
+        try:
+            return self._client.request_raw("GET", route, query, None, omit_cart_key=True)
+        except CoCartException as e:
+            self._handle_no_route(e)
 
     # --- SEO ---
 

@@ -116,9 +116,16 @@ class Response:
         """Check if cart is empty."""
         return self.get_item_count() == 0
 
-    def get_notices(self) -> List[Any]:
-        """Get notices from response data."""
-        return cast(List[Any], self.get("notices", []))
+    def get_notices(self) -> Dict[str, List[str]]:
+        """Get notices from response data, keyed by type.
+
+        CoCart sends notices keyed by type (``success``, ``error``,
+        ``notice``, ``info``), each a list of messages, e.g.
+        ``{"success": ["“Beanie” has been added to your cart."]}``.
+        ``{}`` when there are none (CoCart 4.x sent ``[]``).
+        """
+        notices = self.get("notices", {})
+        return cast(Dict[str, List[str]], notices) if isinstance(notices, dict) else {}
 
     def get_coupons(self) -> List[Dict[str, Any]]:
         """Get applied coupons from response data."""
@@ -137,12 +144,48 @@ class Response:
         return cast(Dict[str, Any], self.get("currency", {}))
 
     def get_shipping_methods(self) -> List[Dict[str, Any]]:
-        """Get shipping methods from response data."""
-        return cast(List[Dict[str, Any]], self.get("shipping", []))
+        """Get the shipping packages from response data, as a list.
+
+        Each package has its ``rates`` keyed by rate ID, and ``chosen_method``.
+        CoCart sends the packages keyed by package ID under ``shipping.packages``;
+        see :meth:`get_shipping` for the whole ``shipping`` field.
+        """
+        shipping = self.get("shipping")
+        if isinstance(shipping, list):
+            return cast(List[Dict[str, Any]], shipping)
+        if not isinstance(shipping, dict):
+            return []
+        packages = shipping.get("packages")
+        if isinstance(packages, dict):
+            return list(packages.values())
+        return cast(List[Dict[str, Any]], packages) if isinstance(packages, list) else []
+
+    def get_shipping(self) -> Optional[Dict[str, Any]]:
+        """Get the cart's whole ``shipping`` field: ``total_packages``,
+        ``show_package_details``, ``has_calculated_shipping`` and ``packages``
+        (keyed by package ID). ``None`` when the response has none.
+        """
+        shipping = self.get("shipping")
+        return cast(Dict[str, Any], shipping) if isinstance(shipping, dict) else None
 
     def get_fees(self) -> List[Dict[str, Any]]:
-        """Get cart fees from response data."""
-        return cast(List[Dict[str, Any]], self.get("fees", []))
+        """Get cart fees from response data, as a list.
+
+        The cart keys fees by fee ID (``{}`` when there are none; ``[]`` from
+        CoCart 4.x).
+        """
+        fees = self.get("fees", [])
+        if isinstance(fees, dict):
+            return list(fees.values())
+        return cast(List[Dict[str, Any]], fees) if isinstance(fees, list) else []
+
+    def get_extensions(self) -> Dict[str, Any]:
+        """Get the cart's ``extensions``: data plugins add to the cart, such as
+        subscription ``recurring_totals`` (see ``docs/extension-data.md``).
+        ``{}`` when there is none.
+        """
+        extensions = self.get("extensions", {})
+        return cast(Dict[str, Any], extensions) if isinstance(extensions, dict) else {}
 
     def get_cross_sells(self) -> List[Dict[str, Any]]:
         """Get cross-sell products from response data."""
@@ -209,6 +252,30 @@ class Response:
     def is_not_modified(self) -> bool:
         """Check if the response is a 304 Not Modified."""
         return self.status_code == 304
+
+    def get_rate_limit(self) -> Dict[str, Optional[int]]:
+        """The ``RateLimit-*`` headers (CoCart Plus, when rate limiting is on).
+
+        Returns ``limit``, ``remaining``, ``reset`` (Unix time the window
+        resets) and ``retry_after`` (seconds to wait after a 429); each is
+        ``None`` when the header wasn't sent.
+        """
+
+        def number(name: str) -> Optional[int]:
+            value = self.get_header(name)
+            if value is None:
+                return None
+            try:
+                return int(float(value))
+            except (ValueError, OverflowError):
+                return None
+
+        return {
+            "limit": number("RateLimit-Limit"),
+            "remaining": number("RateLimit-Remaining"),
+            "reset": number("RateLimit-Reset"),
+            "retry_after": number("RateLimit-Retry-After"),
+        }
 
     def get_cache_status(self) -> Optional[str]:
         """Get the CoCart-Cache header value (HIT, MISS, or SKIP)."""

@@ -44,17 +44,15 @@ Only the **latest major version** receives active development. Older major versi
 |---|---|---|---|
 | 3.13 | Active | Supported | Tested in CI |
 | 3.12 | Active | Supported | Tested in CI |
-| 3.11 | Security | Supported | Tested in CI |
-| 3.10 | Security | Supported | Tested in CI |
-| 3.9 | Security | Minimum version | Tested in CI |
-| 3.8 and below | EOL | Not supported | |
+| 3.11 | Security | Minimum version | Tested in CI |
+| 3.10 and below | EOL | Not supported | |
 
 ### Version support policy
 
 We support all Python versions that are in **active** or **security-fix** status according to the [Python Release Cycle](https://devguide.python.org/versions/).
 
 - **Adding new versions:** When a new Python version is released (typically each October), we add CI testing and official support within 3 months.
-- **Dropping old versions:** When a Python version reaches end-of-life, we continue supporting it for **6 months**, then drop it in the next minor or major SDK release.
+- **Dropping old versions:** A Python version is dropped in the first minor or major SDK release after it reaches end-of-life, or earlier when it reaches end-of-life within **6 months** of that release, so a release never starts out supporting a version about to stop receiving security fixes.
 
 ## Deprecation Notices
 

@@ -61,10 +61,12 @@ from cocart import CoCart
 from cocart.session_manager import SessionManager
 from cocart.storage.file_storage import FileStorage
 
-client = CoCart("https://your-store.com")
 storage = FileStorage("/tmp/cocart-sessions")
+client = CoCart("https://your-store.com", storage=storage)
 session = SessionManager(client, storage)
 ```
+
+Give the client the same storage: it then saves every cart key the store sends, including a replacement for an expired cart, and reads the key back when it's created.
 
 ### Initialize a Cart
 
@@ -74,9 +76,11 @@ Creates a guest cart and persists the cart key:
 cart_key = session.initialize_cart()
 print(cart_key)  # "guest_abc123..."
 
-# The cart key is now stored via the storage adapter
-# On the next request, SessionManager restores it automatically
+# The cart key is now stored via the storage adapter. A client created
+# later with the same storage picks it up on its own.
 ```
+
+If a `SessionManager` keeps the cart key in a storage the client doesn't have, save a replacement key there yourself after the client replaced an expired cart: `session.set_cart_key(client.get_cart_key())`.
 
 ### Login with Basic Auth
 
@@ -208,8 +212,8 @@ from cocart import CoCart
 from cocart.session_manager import SessionManager
 from cocart.storage.file_storage import FileStorage
 
-client = CoCart("https://your-store.com")
 storage = FileStorage("/tmp/cocart-sessions")
+client = CoCart("https://your-store.com", storage=storage)
 session = SessionManager(client, storage)
 
 # 1. Initialize guest session

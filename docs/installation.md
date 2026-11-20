@@ -2,7 +2,7 @@
 
 ## Requirements
 
-* Python 3.9 or higher
+* Python 3.11 or higher
 * One of the following HTTP clients:
   * **requests** (recommended): Installed automatically with the SDK
   * **httpx** (optional): `pip install httpx`
@@ -78,14 +78,22 @@ client = CoCart("https://your-store.com",
     # API namespace (default: "cocart")
     namespace="cocart",
 
-    # CoCart main plugin: "basic" (default) or "legacy"
-    main_plugin="basic",
+    # CoCart main plugin: "starter" (default) or "legacy"
+    main_plugin="starter",
 
-    # Retry transient failures (429, 503, timeouts)
+    # Retry transient failures: 429 for any request; 503 and timeouts for GETs only,
+    # so an order or a cart change is never sent twice. A 429 waits as long as
+    # RateLimit-Retry-After (or Retry-After) says, up to 60 seconds.
+    # CoCart Plus routes (request_raw(): checkout, account) are never retried.
     max_retries=2,
 
-    # ETag conditional requests (default: True)
+    # ETag conditional requests (default: True). A response marked
+    # Cache-Control: no-store or private is never kept.
     etag=True,
+
+    # Log each request, response and error to the "cocart" logger at DEBUG level.
+    # Every query value is shown as *** so cart keys, order keys and emails stay out of logs.
+    debug=False,
 
     # Storage adapter for cart key persistence
     storage=None,           # defaults to MemoryStorage
@@ -109,6 +117,20 @@ client = (
     .add_header("X-Custom-Header", "value")
 )
 ```
+
+### Events
+
+Listen to `request`, `response`, `error`, `retry` and `auth:refresh`, for every request, CoCart Plus routes (`request_raw()`) included. The `response` event carries the `Response` as `response`:
+
+```python
+client.on("response", lambda event: print(event["method"], event["status"], event["duration"]))
+```
+
+The `request`, `response` and `error` events carry the full request URL as `url`, query string included, which can hold the cart key, an order key or an email address. Don't forward it to logs or analytics as it is: send the route only.
+
+### One Client per Customer
+
+The client holds one customer's cart key or login. On a server, create one client per customer (per request, or per session) rather than sharing one between customers, and don't share one storage (or `storage_key`) between them either.
 
 ## Legacy Plugin Support
 

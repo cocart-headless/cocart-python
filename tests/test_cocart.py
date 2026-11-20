@@ -15,7 +15,7 @@ class TestConstructor:
         assert c.get_store_url() == "https://example.com"
         assert c.get_rest_prefix() == "wp-json"
         assert c.get_namespace() == "cocart"
-        assert c.get_main_plugin() == "basic"
+        assert c.get_main_plugin() == "starter"
         assert c.is_guest()
         assert not c.is_authenticated()
         assert c.get_cart_key() is None
@@ -289,15 +289,15 @@ class TestEvents:
         assert events[0]["status"] == 200
 
 
-class TestRequiresBasic:
+class TestRequiresStarter:
     def test_raises_version_exception_for_legacy(self) -> None:
         c = CoCart("https://example.com", main_plugin="legacy")
         with pytest.raises(VersionException):
-            c.requires_basic("products().find_by_slug")
+            c.requires_starter("products().find_by_slug")
 
-    def test_passes_for_basic(self) -> None:
-        c = CoCart("https://example.com", main_plugin="basic")
-        c.requires_basic("products().find_by_slug")  # Should not raise
+    def test_passes_for_starter(self) -> None:
+        c = CoCart("https://example.com", main_plugin="starter")
+        c.requires_starter("products().find_by_slug")  # Should not raise
 
 
 class TestRequestRaw:
