@@ -3,7 +3,7 @@
 Official Python SDK for the [CoCart](https://cocartapi.com) REST API.
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/cocart-headless/cocart-python/tests.yml?label=tests&style=for-the-badge&labelColor=000000)](https://github.com/cocart-headless/cocart-python/actions/workflows/tests.yml)
-[![License](https://img.shields.io/github/license/jayanratna/resend-php?color=9cf&style=for-the-badge&labelColor=000000)](https://github.com/cocart-headless/cocart-python/blob/main/LICENSE)
+[![License](https://img.shields.io/github/license/cocart-headless/cocart-python?color=9cf&style=for-the-badge&labelColor=000000)](https://github.com/cocart-headless/cocart-python/blob/main/LICENSE)
 
 > [!IMPORTANT]
 > This SDK is still in development and not yet ready for production use. Provide feedback if you experience a bug.
@@ -12,7 +12,8 @@ Official Python SDK for the [CoCart](https://cocartapi.com) REST API.
 
 * [ ] Add SDK docs to documentation site
 * [ ] Add support for Cart API extras
-* [ ] Add Checkout API support
+* [x] Add Checkout API support — implemented ([`client.checkout()`](docs/checkout.md)); needs CoCart Plus 2.0, which isn't released yet
+* [x] Add Customers Account API support — implemented ([`client.account()`](docs/account.md)); needs CoCart Plus 2.0, which isn't released yet
 
 ---
 
@@ -20,6 +21,9 @@ Official Python SDK for the [CoCart](https://cocartapi.com) REST API.
 
 - Python 3.11+
 - `requests` library
+- CoCart plugin installed on your WooCommerce store
+- CoCart Plus 2.0 for the account and checkout APIs (not released yet)
+- CoCart JWT Authentication plugin (optional, for JWT auth)
 
 ## Support Policy
 
@@ -55,8 +59,8 @@ See [SUPPORT.md](SUPPORT.md) for our versioning policy, supported Python version
 | [Authentication](docs/authentication.md) | Guest sessions, Basic Auth, JWT (login/refresh/validate/auto-refresh), consumer keys, white-labelling |
 | [Cart](docs/cart.md) | Add/update/remove items, batch requests, coupons, customer details, shipping, fees, totals |
 | [Products](docs/products.md) | List/search/filter products, pagination, variations, categories, tags, attributes, reviews |
-| [Account](docs/account.md) | Registration, customer profile, password, address, order history, downloads, reviews and subscriptions (supported now, awaiting a CoCart plugin release) |
-| [Checkout](docs/checkout.md) | Place orders and take payment, 3D Secure, off-site steps, saved payment methods, the thank-you page, paying for unpaid orders, when no answer comes back (CoCart Plus 2.0) |
+| [Account](docs/account.md) | Registration, customer profile, password, address, order history, downloads, reviews and subscriptions (needs CoCart Plus 2.0, not released yet) |
+| [Checkout](docs/checkout.md) | Place orders and take payment, 3D Secure, off-site steps, saved payment methods, the thank-you page, paying for unpaid orders, when no answer comes back (needs CoCart Plus 2.0, not released yet) |
 | [Sessions](docs/sessions.md) | Admin sessions API, SessionManager, storage adapters, cart transfer on login |
 | [Error Handling](docs/error-handling.md) | Exception hierarchy, catching errors, HTTP status mapping, response error helpers, expired carts, rate limits |
 | [Utilities](docs/utilities.md) | Currency and timezone utility helpers that operate on data already returned by the API |
