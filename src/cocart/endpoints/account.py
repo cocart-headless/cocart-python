@@ -83,7 +83,7 @@ class Account(Endpoint):
     # --- Profile ---
 
     def get_profile(self, params: Optional[Dict[str, Any]] = None) -> Response:
-        """The signed-in customer: name, email, addresses, order stats and ``actions``.
+        """The signed-in customer: name, email, addresses and order stats.
 
         Args:
             params: Optional ``formatted`` (amounts formatted for display) and
@@ -175,12 +175,12 @@ class Account(Endpoint):
     # --- Downloads ---
 
     def get_order_downloads(self, order_id: int) -> Response:
-        """The files one of the customer's orders can download: ``{"downloads": [...]}``."""
+        """The files one of the customer's orders can download, as a list (``to_dict()`` returns it)."""
         return self._get_raw(f"orders/{order_id}/downloads")
 
     def get_guest_order_downloads(self, order_id: int, email: str) -> Response:
         """The files a guest's order can download, looked up with its billing
-        email: ``{"downloads": [...]}``.
+        email, as a list.
 
         Args:
             order_id: Order ID.
@@ -189,7 +189,7 @@ class Account(Endpoint):
         return self._get_raw(f"orders/{order_id}/downloads", {"email": email})
 
     def get_downloads(self) -> Response:
-        """Every file the customer can download: ``{"downloads": [...]}``."""
+        """Every file the customer can download, as a list (``to_dict()`` returns it)."""
         return self._get_raw("downloads")
 
     # --- Reviews ---

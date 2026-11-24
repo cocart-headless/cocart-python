@@ -75,8 +75,8 @@ class Checkout:
 
     def get(self, params: Optional[Dict[str, Any]] = None) -> Response:
         """The checkout as it stands, like a receipt: items, coupons, fees,
-        ``totals`` and ``total_lines``, the payment method, the addresses, each
-        shipping package with its rates, and ``actions``.
+        ``totals`` and ``total_lines``, the payment method, the addresses, and
+        each shipping package with its rates.
 
         Call it for the page the customer reviews before paying: CoCart Plus
         remembers the total it showed, and refuses the order if the total has
@@ -193,8 +193,8 @@ class Checkout:
         return self._client.request_raw("GET", f"{ROUTE}/config")
 
     def get_payment_methods(self) -> Response:
-        """The payment methods for this cart: ``{"payment_methods": [...]}``,
-        each with ``id``, ``title``, ``supports`` and the customer's
+        """The payment methods for this cart: a list (``to_dict()`` returns
+        it), each with ``id``, ``title``, ``supports`` and the customer's
         ``saved_tokens``."""
         return self._client.request_raw("GET", f"{ROUTE}/payment-methods")
 
@@ -207,7 +207,7 @@ class Checkout:
         ``wc-{gateway_id}-payment-token`` in ``payment_data``, or change a
         subscription's card with its ``id`` as ``token_id``. Empty for a guest.
         """
-        methods = _dict(self.get_payment_methods().to_dict()).get("payment_methods")
+        methods = self.get_payment_methods().to_dict()
         cards: List[Dict[str, Any]] = []
         for method in methods if isinstance(methods, list) else []:
             if not isinstance(method, dict) or not isinstance(method.get("id"), str):

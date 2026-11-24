@@ -141,7 +141,15 @@ class TestAccountOrders:
 
 
 class TestAccountDownloads:
-    DOWNLOADS = {"downloads": [{"download_id": "abc", "file": {"name": "Guide.pdf"}}]}
+    DOWNLOADS = [{
+        "id": "abc",
+        "name": "Guide.pdf",
+        "downloads_remaining": 3,
+        "expires": None,
+        "product": {"id": 15, "name": "Guide"},
+        "order": {"id": 42, "number": "42"},
+        "href": "https://example.com/?download_file=15",
+    }]
 
     def test_get_order_downloads_calls_the_order_downloads_route(
         self, client: CoCart, mock_adapter: MockHttpAdapter

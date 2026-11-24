@@ -20,7 +20,8 @@ account = client.account()
 ```
 
 Each response is a document: a `customer`, an `order`, a `subscription`…, as
-its `object` says, with the `actions` the customer can take next. A change
+its `object` says. An order or subscription has `allowed_actions`, the names
+of what the customer may do with it now (`pay`, `cancel`…). A change
 also says what it did in `result` (`{"code", "message"}`): `account_updated`,
 `account_created`, `order_cancelled`, `subscription_suspended`…
 
@@ -81,7 +82,7 @@ response = client.account().get_profile()
 
 response.get("email")
 response.get("billing")
-response.get("actions")
+response.get("recent_orders")  # the 5 most recent orders, newest first: id, number, status, date_created, total, href
 
 # Amounts formatted for display, and only some meta keys:
 response = client.account().get_profile({"formatted": True, "meta_keys": ["loyalty_tier"]})
@@ -194,8 +195,7 @@ An order that can't be cancelled is `409 cocart_order_cannot_be_cancelled`.
 ### Get Downloads for an Order
 
 `GET /my-account/orders/{id}/downloads`, with the billing email for a guest
-order. The response is returned as sent, `{"downloads": [...]}`, like
-`get_downloads()`.
+order. The response is the list of downloads, like `get_downloads()`.
 
 ```python
 response = client.account().get_order_downloads(123)
@@ -203,15 +203,15 @@ response = client.account().get_order_downloads(123)
 # For a guest order
 response = client.account().get_guest_order_downloads(123, "customer@email.com")
 
-for download in response.get("downloads"):
-    print(download)
+for download in response.to_dict():
+    print(download["name"], download["downloads_remaining"], download["href"])  # downloads_remaining is None when unlimited
 ```
 
 ### Get All Downloads
 
 ```python
 response = client.account().get_downloads()
-response.get("downloads")
+response.to_dict()  # the list of downloads, in the same shape
 ```
 
 ## Reviews

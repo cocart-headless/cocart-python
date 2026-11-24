@@ -182,7 +182,7 @@ config.get("store.privacy_url")
 The payment methods for this cart:
 
 ```python
-for method in client.checkout().get_payment_methods().get("payment_methods"):
+for method in client.checkout().get_payment_methods().to_dict():
     print(method["id"], method["title"], method["test_mode"], method["supports"]["subscriptions"])
 ```
 
